@@ -1,0 +1,15 @@
+{
+  "name": "code-expert-agent",
+  "local_port": 50330,
+  "entrypoint": "bun run dev",
+  "publish": {
+    "label": "code-expert-agent",
+    "type": "http",
+    "entrypoint": "bun run prod",
+    "published_port": 50479,
+    "env": {
+      "NODE_ENV": "production",
+      "ZO_CLIENT_IDENTITY_TOKEN": "none"
+    }
+  }
+}

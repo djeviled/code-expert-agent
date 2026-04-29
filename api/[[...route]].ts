@@ -651,7 +651,7 @@ app.post("/api/admin/users/:id/freeze", requireAdmin, async (c) => {
   return c.json({ success: true });
 });
 
-export default app;
+// app is used by handler below
 
 // ────────────────────────────────────────────────────────────
 // VERCEL HANDLER

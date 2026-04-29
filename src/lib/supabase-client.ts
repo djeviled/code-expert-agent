@@ -1,45 +1,34 @@
 import { createClient } from "@supabase/supabase-js";
 
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || "https://pbfkqyrplcdzbnetfwjm.supabase.co";
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || "your_supabase_anon_key_here";
+const supabaseUrl =
+  import.meta.env.VITE_SUPABASE_URL || "https://pbfkqyrplcdzbnetfwjm.supabase.co";
+const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || "";
+
+if (!supabaseAnonKey && import.meta.env.DEV) {
+  console.warn(
+    "⚠️ VITE_SUPABASE_ANON_KEY is not set. Add it to your .env file.\n" +
+    "Get it from: https://supabase.com/dashboard/project/pbfkqyrplcdzbnetfwjm/settings/api"
+  );
+}
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
-export interface UserContext {
+export interface UserProfile {
   id: string;
   email: string;
   name: string;
-  tier: "starter" | "professional" | "agency" | "free";
+  role: "ADMIN" | "SITE" | "CODE" | "BUNDLE";
+  credits?: number;
   created_at: string;
 }
 
-export async function getUserContext(email: string): Promise<UserContext | null> {
+export async function getUserProfile(userId: string): Promise<UserProfile | null> {
   const { data, error } = await supabase
     .from("users")
     .select("*")
-    .eq("email", email)
+    .eq("id", userId)
     .single();
 
   if (error || !data) return null;
-  return data as UserContext;
-}
-
-export async function createUser(email: string, name: string, tier: UserContext["tier"] = "free"): Promise<UserContext> {
-  const { data, error } = await supabase
-    .from("users")
-    .insert({ email, name, tier })
-    .select()
-    .single();
-
-  if (error) throw new Error(`Failed to create user: ${error.message}`);
-  return data as UserContext;
-}
-
-export async function updateUserTier(email: string, tier: UserContext["tier"]): Promise<void> {
-  const { error } = await supabase
-    .from("users")
-    .update({ tier })
-    .eq("email", email);
-
-  if (error) throw new Error(`Failed to update user tier: ${error.message}`);
+  return data as UserProfile;
 }

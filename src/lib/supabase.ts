@@ -1,19 +1,31 @@
 import { createClient } from "@supabase/supabase-js";
 
 const supabaseUrl = process.env.SUPABASE_URL || "https://pbfkqyrplcdzbnetfwjm.supabase.co";
-const supabaseAnonKey = process.env.SUPABASE_ANON_KEY || "your_supabase_anon_key_here";
+const supabaseServiceKey = process.env.SUPABASE_SERVICE_KEY || "";
 
-export const supabase = createClient(supabaseUrl, supabaseAnonKey);
+if (!supabaseServiceKey && process.env.NODE_ENV !== "test") {
+  console.warn(
+    "⚠️ SUPABASE_SERVICE_KEY is not set. Server-side Supabase operations will fail.\n" +
+    "Get it from: https://supabase.com/dashboard/project/pbfkqyrplcdzbnetfwjm/settings/api"
+  );
+}
 
-export interface UserContext {
+// Server-side admin client (use only in API routes — never expose to client)
+export const supabase = createClient(supabaseUrl, supabaseServiceKey, {
+  auth: { autoRefreshToken: false, persistSession: false },
+});
+
+export interface UserProfile {
   id: string;
   email: string;
   name: string;
-  tier: "starter" | "professional" | "agency" | "free";
+  role: "ADMIN" | "SITE" | "CODE" | "BUNDLE";
+  credits?: number;
   created_at: string;
+  updated_at: string;
 }
 
-export async function getUserContext(email: string): Promise<UserContext | null> {
+export async function getUserByEmail(email: string): Promise<UserProfile | null> {
   const { data, error } = await supabase
     .from("users")
     .select("*")
@@ -21,25 +33,29 @@ export async function getUserContext(email: string): Promise<UserContext | null>
     .single();
 
   if (error || !data) return null;
-  return data as UserContext;
+  return data as UserProfile;
 }
 
-export async function createUser(email: string, name: string, tier: UserContext["tier"] = "free"): Promise<UserContext> {
+export async function createUserProfile(
+  id: string,
+  email: string,
+  name: string,
+  role: UserProfile["role"] = "SITE"
+): Promise<UserProfile> {
   const { data, error } = await supabase
     .from("users")
-    .insert({ email, name, tier })
+    .insert({ id, email, name, role })
     .select()
     .single();
 
   if (error) throw new Error(`Failed to create user: ${error.message}`);
-  return data as UserContext;
+  return data as UserProfile;
 }
 
-export async function updateUserTier(email: string, tier: UserContext["tier"]): Promise<void> {
-  const { error } = await supabase
-    .from("users")
-    .update({ tier })
-    .eq("email", email);
-
-  if (error) throw new Error(`Failed to update user tier: ${error.message}`);
+export async function updateUserRole(
+  userId: string,
+  role: UserProfile["role"]
+): Promise<void> {
+  const { error } = await supabase.from("users").update({ role }).eq("id", userId);
+  if (error) throw new Error(`Failed to update user role: ${error.message}`);
 }

@@ -5,58 +5,74 @@ export interface PricingTier {
   price: { upfront: string; onDelivery: string; total: string };
   description: string;
   features: string[];
+  /** Stripe Price ID for the upfront payment */
   priceId: string;
   highlighted?: boolean;
   credits: number;
 }
 
+/**
+ * Stripe Price IDs (live mode — verified from Stripe dashboard)
+ * Upfront prices charged at checkout.
+ * Balance prices charged on successful delivery.
+ */
+export const STRIPE_PRICES = {
+  // Upfront
+  SITE_UPFRONT: "price_1TQt0SGusAHZYXWWXcinZvDI",   // $49
+  CODE_UPFRONT: "price_1TQt0TGusAHZYXWWEr2O0ZHT",   // $79
+  BUNDLE_UPFRONT: "price_1TQt0TGusAHZYXWWMmN7kv19", // $79
+  // Balance (charged after successful delivery)
+  SITE_BALANCE: "price_1TQt0aGusAHZYXWWVlliF9Qd",   // $99
+  CODE_BALANCE: "price_1TQt0aGusAHZYXWWaopyNgvy",   // $149
+  BUNDLE_BALANCE: "price_1TQt0aGusAHZYXWWxEwTktKL", // $149
+} as const;
+
 export const PRICING_TIERS: PricingTier[] = [
   {
     id: "tier1",
-    name: "Site Live on Vercel",
+    name: "SITE Rescue",
     tier: 1,
-    price: { upfront: "$49", onDelivery: "$150", total: "$199" },
-    description: "Your site is deployed and running on Vercel, ready to go live.",
+    price: { upfront: "$49", onDelivery: "$99", total: "$148" },
+    description: "Your AI-generated site, broken and stalled? We fix it and deploy it live.",
     features: [
-      "Full code analysis",
-      "Debug & fix errors",
-      "Deploy to Vercel",
+      "Agent analyzes your broken site code",
+      "Fixes errors and dependency issues",
+      "Deploys successfully to Vercel",
       "Code delivered error-free",
     ],
-    priceId: "price_1TQoyrHAbyd0XocLT0otp7oQ",
+    priceId: STRIPE_PRICES.SITE_UPFRONT,
     credits: 1,
   },
   {
     id: "tier2",
-    name: "Code Without Errors (Premium)",
+    name: "CODE Rescue",
     tier: 2,
-    price: { upfront: "$79", onDelivery: "$220", total: "$299" },
-    description: "Everything in Tier 1 plus premium polish — zero errors, fully optimized.",
+    price: { upfront: "$79", onDelivery: "$149", total: "$228" },
+    description: "Your code almost works — but won't compile? We dig in and fix it.",
     features: [
-      "Everything in Tier 1",
-      "Premium code polish",
+      "Agent digs into your broken AI code",
+      "Fixes syntax, logic, and integration errors",
       "Zero errors guaranteed",
-      "Performance optimization",
-      "Code review report",
+      "Code review report included",
+      "Code delivered clean and error-free",
     ],
-    priceId: "price_1TQoyrHAbyd0XocLTijLTgc5",
+    priceId: STRIPE_PRICES.CODE_UPFRONT,
     credits: 2,
     highlighted: true,
   },
   {
     id: "bundle",
-    name: "Bundle — 2 Sites",
+    name: "Bundle — Site + Code",
     tier: 3,
-    price: { upfront: "$79", onDelivery: "$250", total: "$329" },
-    description: "Rescue 2 sites at once. Perfect for developers with multiple projects.",
+    price: { upfront: "$79", onDelivery: "$149", total: "$228" },
+    description: "Site + Code rescued together. Perfect for full-stack projects.",
     features: [
-      "2 sites rescued",
-      "Full code analysis",
-      "Debug & fix errors",
-      "Deploy to Vercel",
+      "Agent fixes your site AND code together",
+      "Full deployment to Vercel",
+      "Everything delivered error-free",
       "Priority support",
     ],
-    priceId: "price_1TQoyrHAbyd0XocLSAFeYM7n",
+    priceId: STRIPE_PRICES.BUNDLE_UPFRONT,
     credits: 2,
   },
 ];

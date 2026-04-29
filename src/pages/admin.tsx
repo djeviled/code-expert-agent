@@ -1,77 +1,257 @@
-import { useState, useEffect } from "react";
-import { Users, CreditCard, ShoppingCart, DollarSign, Activity, Search, RefreshCw, Ban, CheckCircle, AlertCircle, Clock, Eye, Plus, Minus, X } from "lucide-react";
+import { useState, useEffect, useCallback } from "react";
+import {
+  Users, CreditCard, ShoppingCart, DollarSign, Activity,
+  Search, RefreshCw, Ban, CheckCircle, AlertCircle, Clock,
+  Plus, Minus, X, Loader, ExternalLink, Truck,
+} from "lucide-react";
+import { useAuth } from "../lib/auth-context";
+import { useNavigate } from "react-router-dom";
 
-// Mock data - in production, fetch from Supabase
-const MOCK_USERS = [
-  { id: "1", email: "ada@example.com", name: "Ada Lovelace", credits: 2, status: "active", created_at: "2025-04-20", total_spent: 348 },
-  { id: "2", email: "alan@example.com", name: "Alan Turing", credits: 0, status: "active", created_at: "2025-04-22", total_spent: 199 },
-  { id: "3", email: "grace@example.com", name: "Grace Hopper", credits: 1, status: "frozen", created_at: "2025-04-18", total_spent: 498 },
-  { id: "4", email: "tim@example.com", name: "Tim Berners-Lee", credits: 0, status: "active", created_at: "2025-04-25", total_spent: 0 },
-];
+// ─── Types ────────────────────────────────────────────────────────────────────
+interface AdminUser {
+  id: string;
+  email: string;
+  name: string;
+  role: string;
+  credits?: number;
+  created_at: string;
+  is_banned?: boolean;
+  projects?: { id: string; status: string; upfront_amount: number }[];
+}
 
-const MOCK_ORDERS = [
-  { id: "ord_1", user: "ada@example.com", tier: "tier2", status: "delivered", amount: 299, created_at: "2025-04-20" },
-  { id: "ord_2", user: "alan@example.com", tier: "tier1", status: "pending", amount: 199, created_at: "2025-04-22" },
-  { id: "ord_3", user: "grace@example.com", tier: "bundle", status: "in_progress", amount: 329, created_at: "2025-04-18" },
-  { id: "ord_4", user: "tim@example.com", tier: "tier1", status: "refunded", amount: 49, created_at: "2025-04-25" },
-];
+interface AdminOrder {
+  id: string;
+  tier: string;
+  status: string;
+  upfront_amount: number;
+  balance_amount: number;
+  description?: string;
+  github_repo?: string;
+  created_at: string;
+  delivered_at?: string;
+  users?: { email: string; name: string };
+}
 
-const MOCK_STATS = {
-  total_users: 127,
-  active_users: 98,
-  total_orders: 234,
-  pending_orders: 12,
-  total_revenue: 45680,
-  this_month_revenue: 8920,
-};
+interface Stats {
+  total_users: number;
+  active_users: number;
+  total_orders: number;
+  pending_orders: number;
+  in_progress_orders: number;
+  total_revenue: number;
+  this_month_revenue: number;
+  active_sessions: number;
+}
 
 type Tab = "users" | "orders" | "credits" | "revenue";
 
-export default function AdminDashboard() {
-  const [activeTab, setActiveTab] = useState<Tab>("users");
-  const [users, setUsers] = useState(MOCK_USERS);
-  const [orders] = useState(MOCK_ORDERS);
-  const [stats] = useState(MOCK_STATS);
-  const [searchQuery, setSearchQuery] = useState("");
-  const [selectedUser, setSelectedUser] = useState<typeof MOCK_USERS[0] | null>(null);
-  const [showCreditModal, setShowCreditModal] = useState(false);
-  const [creditAmount, setCreditAmount] = useState(0);
-  const [creditAction, setCreditAction] = useState<"add" | "remove">("add");
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+function fmtAmount(cents: number) {
+  return `$${(cents / 100).toFixed(2)}`;
+}
 
-  const filteredUsers = users.filter(u => 
-    u.email.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    u.name.toLowerCase().includes(searchQuery.toLowerCase())
+function fmtDate(s: string) {
+  return new Date(s).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+}
+
+const STATUS_STYLES: Record<string, string> = {
+  pending: "bg-yellow-500/20 text-yellow-400",
+  in_progress: "bg-blue-500/20 text-blue-400",
+  awaiting_payment: "bg-purple-500/20 text-purple-400",
+  delivered: "bg-green-500/20 text-green-400",
+  failed: "bg-red-500/20 text-red-400",
+};
+
+// ─── Component ────────────────────────────────────────────────────────────────
+export default function AdminDashboard() {
+  const { token } = useAuth();
+  const navigate = useNavigate();
+
+  const [activeTab, setActiveTab] = useState<Tab>("users");
+  const [users, setUsers] = useState<AdminUser[]>([]);
+  const [orders, setOrders] = useState<AdminOrder[]>([]);
+  const [stats, setStats] = useState<Stats | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [selectedUser, setSelectedUser] = useState<AdminUser | null>(null);
+  const [showCreditModal, setShowCreditModal] = useState(false);
+  const [creditAmount, setCreditAmount] = useState(1);
+  const [creditAction, setCreditAction] = useState<"add" | "remove">("add");
+  const [actionLoading, setActionLoading] = useState<string | null>(null);
+  const [toast, setToast] = useState<{ msg: string; type: "success" | "error" } | null>(null);
+
+  const authHeaders = {
+    "Content-Type": "application/json",
+    Authorization: `Bearer ${token}`,
+  };
+
+  function showToast(msg: string, type: "success" | "error" = "success") {
+    setToast({ msg, type });
+    setTimeout(() => setToast(null), 3500);
+  }
+
+  const fetchAll = useCallback(async () => {
+    if (!token) return;
+    setRefreshing(true);
+    try {
+      const [statsRes, usersRes, ordersRes] = await Promise.all([
+        fetch("/api/admin/stats", { headers: authHeaders }),
+        fetch("/api/admin/users", { headers: authHeaders }),
+        fetch("/api/admin/orders", { headers: authHeaders }),
+      ]);
+
+      if (statsRes.status === 401 || usersRes.status === 401) {
+        navigate("/login");
+        return;
+      }
+
+      const [statsData, usersData, ordersData] = await Promise.all([
+        statsRes.json(),
+        usersRes.json(),
+        ordersRes.json(),
+      ]);
+
+      setStats(statsData);
+      setUsers(usersData.users || []);
+      setOrders(ordersData.orders || []);
+    } catch (err) {
+      console.error("Admin fetch error:", err);
+      showToast("Failed to load data", "error");
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }, [token]);
+
+  useEffect(() => {
+    fetchAll();
+  }, [fetchAll]);
+
+  async function handleToggleFreeze(user: AdminUser) {
+    setActionLoading(user.id);
+    try {
+      await fetch(`/api/admin/users/${user.id}/freeze`, {
+        method: "POST",
+        headers: authHeaders,
+        body: JSON.stringify({ frozen: !user.is_banned }),
+      });
+      setUsers((prev) =>
+        prev.map((u) => (u.id === user.id ? { ...u, is_banned: !u.is_banned } : u))
+      );
+      showToast(`User ${user.is_banned ? "unfrozen" : "frozen"}`);
+    } catch {
+      showToast("Action failed", "error");
+    } finally {
+      setActionLoading(null);
+    }
+  }
+
+  async function handleCreditChange() {
+    if (!selectedUser) return;
+    setActionLoading(selectedUser.id);
+    try {
+      const res = await fetch(`/api/admin/users/${selectedUser.id}/credits`, {
+        method: "POST",
+        headers: authHeaders,
+        body: JSON.stringify({ action: creditAction, amount: creditAmount }),
+      });
+      const data = await res.json();
+      setUsers((prev) =>
+        prev.map((u) => (u.id === selectedUser.id ? { ...u, credits: data.credits } : u))
+      );
+      showToast(`Credits ${creditAction === "add" ? "added" : "removed"} successfully`);
+      setShowCreditModal(false);
+    } catch {
+      showToast("Failed to update credits", "error");
+    } finally {
+      setActionLoading(null);
+    }
+  }
+
+  async function handleDeliver(order: AdminOrder) {
+    setActionLoading(order.id);
+    try {
+      const res = await fetch(`/api/admin/orders/${order.id}/deliver`, {
+        method: "POST",
+        headers: authHeaders,
+      });
+      const data = await res.json();
+      if (data.error) throw new Error(data.error);
+
+      setOrders((prev) =>
+        prev.map((o) => (o.id === order.id ? { ...o, status: "awaiting_payment" } : o))
+      );
+
+      if (data.balanceUrl) {
+        navigator.clipboard?.writeText(data.balanceUrl).catch(() => {});
+      }
+      showToast("Order marked as delivered. Balance link copied to clipboard!");
+    } catch (err: any) {
+      showToast(err.message || "Failed to deliver order", "error");
+    } finally {
+      setActionLoading(null);
+    }
+  }
+
+  async function handleStatusChange(order: AdminOrder, status: string) {
+    setActionLoading(order.id);
+    try {
+      await fetch(`/api/admin/orders/${order.id}/status`, {
+        method: "POST",
+        headers: authHeaders,
+        body: JSON.stringify({ status }),
+      });
+      setOrders((prev) =>
+        prev.map((o) => (o.id === order.id ? { ...o, status } : o))
+      );
+      showToast("Status updated");
+    } catch {
+      showToast("Failed to update status", "error");
+    } finally {
+      setActionLoading(null);
+    }
+  }
+
+  const filteredUsers = users.filter(
+    (u) =>
+      u.email.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (u.name || "").toLowerCase().includes(searchQuery.toLowerCase())
   );
 
-  const handleToggleStatus = (userId: string) => {
-    setUsers(users.map(u => 
-      u.id === userId 
-        ? { ...u, status: u.status === "active" ? "frozen" : "active" }
-        : u
-    ));
-  };
+  const filteredOrders = orders.filter(
+    (o) =>
+      (o.users?.email || "").toLowerCase().includes(searchQuery.toLowerCase()) ||
+      o.tier.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      o.status.toLowerCase().includes(searchQuery.toLowerCase())
+  );
 
-  const handleCreditChange = () => {
-    if (!selectedUser) return;
-    const amount = creditAction === "add" ? creditAmount : -creditAmount;
-    setUsers(users.map(u => 
-      u.id === selectedUser.id 
-        ? { ...u, credits: Math.max(0, u.credits + amount) }
-        : u
-    ));
-    setShowCreditModal(false);
-    setCreditAmount(0);
-  };
+  const totalRevenue = stats ? stats.total_revenue : 0;
+  const thisMonthRevenue = stats ? stats.this_month_revenue : 0;
 
-  const openCreditModal = (user: typeof MOCK_USERS[0], action: "add" | "remove") => {
-    setSelectedUser(user);
-    setCreditAction(action);
-    setCreditAmount(0);
-    setShowCreditModal(true);
-  };
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-[#0a0a1a] flex items-center justify-center">
+        <Loader className="w-8 h-8 text-blue-400 animate-spin" />
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-[#0a0a1a] text-white">
+      {/* Toast */}
+      {toast && (
+        <div
+          className={`fixed top-4 right-4 z-50 px-5 py-3 rounded-xl text-sm font-medium shadow-lg transition-all ${
+            toast.type === "success"
+              ? "bg-green-500/20 border border-green-500/40 text-green-300"
+              : "bg-red-500/20 border border-red-500/40 text-red-300"
+          }`}
+        >
+          {toast.msg}
+        </div>
+      )}
+
       {/* Header */}
       <header className="bg-[#0f1629] border-b border-white/10 px-6 py-4">
         <div className="flex items-center justify-between">
@@ -83,12 +263,17 @@ export default function AdminDashboard() {
             </div>
           </div>
           <div className="flex items-center gap-4">
-            <button className="text-gray-400 hover:text-white p-2">
-              <RefreshCw className="w-5 h-5" />
+            <button
+              onClick={fetchAll}
+              disabled={refreshing}
+              className="text-gray-400 hover:text-white p-2 disabled:opacity-50"
+              title="Refresh"
+            >
+              <RefreshCw className={`w-5 h-5 ${refreshing ? "animate-spin" : ""}`} />
             </button>
             <div className="flex items-center gap-2 bg-blue-500/20 px-3 py-1.5 rounded-full">
               <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse" />
-              <span className="text-xs text-blue-400">System Online</span>
+              <span className="text-xs text-blue-400">Live</span>
             </div>
           </div>
         </div>
@@ -96,29 +281,29 @@ export default function AdminDashboard() {
 
       {/* Stats */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 p-6">
-        <StatCard 
+        <StatCard
           icon={<Users className="w-5 h-5 text-blue-400" />}
           label="Total Users"
-          value={stats.total_users.toString()}
-          sublabel={`${stats.active_users} active`}
+          value={stats?.total_users.toString() || "0"}
+          sublabel={`${stats?.active_users || 0} registered`}
         />
-        <StatCard 
+        <StatCard
           icon={<ShoppingCart className="w-5 h-5 text-purple-400" />}
           label="Total Orders"
-          value={stats.total_orders.toString()}
-          sublabel={`${stats.pending_orders} pending`}
+          value={stats?.total_orders.toString() || "0"}
+          sublabel={`${stats?.pending_orders || 0} pending`}
         />
-        <StatCard 
+        <StatCard
           icon={<DollarSign className="w-5 h-5 text-green-400" />}
           label="Total Revenue"
-          value={`$${(stats.total_revenue / 100).toLocaleString()}`}
-          sublabel={`$${(stats.this_month_revenue / 100).toLocaleString()} this month`}
+          value={fmtAmount(totalRevenue)}
+          sublabel={`${fmtAmount(thisMonthRevenue)} this month`}
         />
-        <StatCard 
+        <StatCard
           icon={<Activity className="w-5 h-5 text-cyan-400" />}
-          label="Active Sessions"
-          value="8"
-          sublabel="Real-time"
+          label="Agent Sessions"
+          value={stats?.active_sessions?.toString() || "0"}
+          sublabel="Last 24 hours"
         />
       </div>
 
@@ -143,7 +328,7 @@ export default function AdminDashboard() {
 
       {/* Content */}
       <div className="p-6">
-        {/* Search Bar */}
+        {/* Search */}
         <div className="relative mb-6">
           <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
           <input
@@ -155,134 +340,192 @@ export default function AdminDashboard() {
           />
         </div>
 
-        {/* Users Tab */}
+        {/* ── Users Tab ── */}
         {activeTab === "users" && (
           <div className="bg-white/5 border border-white/10 rounded-2xl overflow-hidden">
-            <table className="w-full">
-              <thead className="bg-white/5">
-                <tr>
-                  <th className="text-left px-6 py-4 text-xs font-medium text-gray-400 uppercase">User</th>
-                  <th className="text-left px-6 py-4 text-xs font-medium text-gray-400 uppercase">Credits</th>
-                  <th className="text-left px-6 py-4 text-xs font-medium text-gray-400 uppercase">Status</th>
-                  <th className="text-left px-6 py-4 text-xs font-medium text-gray-400 uppercase">Spent</th>
-                  <th className="text-left px-6 py-4 text-xs font-medium text-gray-400 uppercase">Joined</th>
-                  <th className="text-right px-6 py-4 text-xs font-medium text-gray-400 uppercase">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-white/5">
-                {filteredUsers.map((user) => (
-                  <tr key={user.id} className="hover:bg-white/5 transition">
-                    <td className="px-6 py-4">
-                      <div>
-                        <p className="font-medium">{user.name}</p>
-                        <p className="text-sm text-gray-400">{user.email}</p>
-                      </div>
-                    </td>
-                    <td className="px-6 py-4">
-                      <div className="flex items-center gap-2">
-                        <CreditCard className="w-4 h-4 text-blue-400" />
-                        <span className={user.credits > 0 ? "text-green-400" : "text-gray-400"}>
-                          {user.credits} credits
-                        </span>
-                      </div>
-                    </td>
-                    <td className="px-6 py-4">
-                      <span className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium ${
-                        user.status === "active" 
-                          ? "bg-green-500/20 text-green-400" 
-                          : "bg-red-500/20 text-red-400"
-                      }`}>
-                        {user.status === "active" ? (
-                          <><CheckCircle className="w-3 h-3" /> Active</>
-                        ) : (
-                          <><Ban className="w-3 h-3" /> Frozen</>
-                        )}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4 text-gray-400">${user.total_spent}</td>
-                    <td className="px-6 py-4 text-gray-400 text-sm">{user.created_at}</td>
-                    <td className="px-6 py-4">
-                      <div className="flex items-center justify-end gap-2">
-                        <button 
-                          onClick={() => openCreditModal(user, "add")}
-                          className="p-2 hover:bg-white/10 rounded-lg text-green-400"
-                          title="Add credits"
-                        >
-                          <Plus className="w-4 h-4" />
-                        </button>
-                        <button 
-                          onClick={() => openCreditModal(user, "remove")}
-                          className="p-2 hover:bg-white/10 rounded-lg text-red-400"
-                          title="Remove credits"
-                        >
-                          <Minus className="w-4 h-4" />
-                        </button>
-                        <button 
-                          onClick={() => handleToggleStatus(user.id)}
-                          className={`p-2 hover:bg-white/10 rounded-lg ${
-                            user.status === "active" ? "text-red-400" : "text-green-400"
-                          }`}
-                          title={user.status === "active" ? "Freeze user" : "Unfreeze user"}
-                        >
-                          {user.status === "active" ? <Ban className="w-4 h-4" /> : <CheckCircle className="w-4 h-4" />}
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            {filteredUsers.length === 0 ? (
+              <div className="p-12 text-center text-gray-400">
+                {searchQuery ? "No users match your search" : "No users yet"}
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full">
+                  <thead className="bg-white/5">
+                    <tr>
+                      <th className="text-left px-6 py-4 text-xs font-medium text-gray-400 uppercase">User</th>
+                      <th className="text-left px-6 py-4 text-xs font-medium text-gray-400 uppercase">Role</th>
+                      <th className="text-left px-6 py-4 text-xs font-medium text-gray-400 uppercase">Credits</th>
+                      <th className="text-left px-6 py-4 text-xs font-medium text-gray-400 uppercase">Orders</th>
+                      <th className="text-left px-6 py-4 text-xs font-medium text-gray-400 uppercase">Joined</th>
+                      <th className="text-right px-6 py-4 text-xs font-medium text-gray-400 uppercase">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-white/5">
+                    {filteredUsers.map((user) => (
+                      <tr key={user.id} className="hover:bg-white/5 transition">
+                        <td className="px-6 py-4">
+                          <div>
+                            <p className="font-medium">{user.name || "—"}</p>
+                            <p className="text-sm text-gray-400">{user.email}</p>
+                          </div>
+                        </td>
+                        <td className="px-6 py-4">
+                          <span className="bg-blue-500/20 text-blue-400 px-2 py-1 rounded text-xs">
+                            {user.role}
+                          </span>
+                        </td>
+                        <td className="px-6 py-4">
+                          <span className={`font-medium ${(user.credits || 0) > 0 ? "text-green-400" : "text-gray-500"}`}>
+                            {user.credits || 0}
+                          </span>
+                        </td>
+                        <td className="px-6 py-4 text-gray-400">
+                          {user.projects?.length || 0}
+                        </td>
+                        <td className="px-6 py-4 text-gray-400 text-sm">
+                          {fmtDate(user.created_at)}
+                        </td>
+                        <td className="px-6 py-4">
+                          <div className="flex items-center justify-end gap-1">
+                            <button
+                              onClick={() => { setSelectedUser(user); setCreditAction("add"); setCreditAmount(1); setShowCreditModal(true); }}
+                              className="p-2 hover:bg-white/10 rounded-lg text-green-400"
+                              title="Add credits"
+                              disabled={actionLoading === user.id}
+                            >
+                              <Plus className="w-4 h-4" />
+                            </button>
+                            <button
+                              onClick={() => { setSelectedUser(user); setCreditAction("remove"); setCreditAmount(1); setShowCreditModal(true); }}
+                              className="p-2 hover:bg-white/10 rounded-lg text-red-400"
+                              title="Remove credits"
+                              disabled={actionLoading === user.id}
+                            >
+                              <Minus className="w-4 h-4" />
+                            </button>
+                            <button
+                              onClick={() => handleToggleFreeze(user)}
+                              className={`p-2 hover:bg-white/10 rounded-lg ${user.is_banned ? "text-green-400" : "text-orange-400"}`}
+                              title={user.is_banned ? "Unfreeze" : "Freeze"}
+                              disabled={actionLoading === user.id}
+                            >
+                              {actionLoading === user.id ? (
+                                <Loader className="w-4 h-4 animate-spin" />
+                              ) : user.is_banned ? (
+                                <CheckCircle className="w-4 h-4" />
+                              ) : (
+                                <Ban className="w-4 h-4" />
+                              )}
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
         )}
 
-        {/* Orders Tab */}
+        {/* ── Orders Tab ── */}
         {activeTab === "orders" && (
           <div className="bg-white/5 border border-white/10 rounded-2xl overflow-hidden">
-            <table className="w-full">
-              <thead className="bg-white/5">
-                <tr>
-                  <th className="text-left px-6 py-4 text-xs font-medium text-gray-400 uppercase">Order</th>
-                  <th className="text-left px-6 py-4 text-xs font-medium text-gray-400 uppercase">Customer</th>
-                  <th className="text-left px-6 py-4 text-xs font-medium text-gray-400 uppercase">Tier</th>
-                  <th className="text-left px-6 py-4 text-xs font-medium text-gray-400 uppercase">Status</th>
-                  <th className="text-left px-6 py-4 text-xs font-medium text-gray-400 uppercase">Amount</th>
-                  <th className="text-left px-6 py-4 text-xs font-medium text-gray-400 uppercase">Date</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-white/5">
-                {orders.map((order) => (
-                  <tr key={order.id} className="hover:bg-white/5 transition">
-                    <td className="px-6 py-4 font-mono text-sm text-blue-400">{order.id}</td>
-                    <td className="px-6 py-4 text-gray-300">{order.user}</td>
-                    <td className="px-6 py-4">
-                      <span className="bg-blue-500/20 text-blue-400 px-2 py-1 rounded text-xs font-medium">
-                        {order.tier}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4">
-                      <span className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium ${
-                        order.status === "delivered" ? "bg-green-500/20 text-green-400" :
-                        order.status === "pending" ? "bg-yellow-500/20 text-yellow-400" :
-                        order.status === "in_progress" ? "bg-blue-500/20 text-blue-400" :
-                        "bg-red-500/20 text-red-400"
-                      }`}>
-                        {order.status === "delivered" && <CheckCircle className="w-3 h-3" />}
-                        {order.status === "pending" && <Clock className="w-3 h-3" />}
-                        {order.status === "in_progress" && <Activity className="w-3 h-3" />}
-                        {order.status === "refunded" && <AlertCircle className="w-3 h-3" />}
-                        {order.status.replace("_", " ")}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4 text-gray-300">${order.amount}</td>
-                    <td className="px-6 py-4 text-gray-400 text-sm">{order.created_at}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            {filteredOrders.length === 0 ? (
+              <div className="p-12 text-center text-gray-400">
+                {searchQuery ? "No orders match your search" : "No orders yet"}
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full">
+                  <thead className="bg-white/5">
+                    <tr>
+                      <th className="text-left px-6 py-4 text-xs font-medium text-gray-400 uppercase">Customer</th>
+                      <th className="text-left px-6 py-4 text-xs font-medium text-gray-400 uppercase">Tier</th>
+                      <th className="text-left px-6 py-4 text-xs font-medium text-gray-400 uppercase">Status</th>
+                      <th className="text-left px-6 py-4 text-xs font-medium text-gray-400 uppercase">Upfront</th>
+                      <th className="text-left px-6 py-4 text-xs font-medium text-gray-400 uppercase">Balance</th>
+                      <th className="text-left px-6 py-4 text-xs font-medium text-gray-400 uppercase">Date</th>
+                      <th className="text-right px-6 py-4 text-xs font-medium text-gray-400 uppercase">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-white/5">
+                    {filteredOrders.map((order) => (
+                      <tr key={order.id} className="hover:bg-white/5 transition">
+                        <td className="px-6 py-4">
+                          <div>
+                            <p className="font-medium text-sm">{order.users?.name || "—"}</p>
+                            <p className="text-xs text-gray-400">{order.users?.email}</p>
+                          </div>
+                        </td>
+                        <td className="px-6 py-4">
+                          <span className="bg-blue-500/20 text-blue-400 px-2 py-1 rounded text-xs font-medium">
+                            {order.tier}
+                          </span>
+                        </td>
+                        <td className="px-6 py-4">
+                          <span className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium ${STATUS_STYLES[order.status] || "bg-gray-500/20 text-gray-400"}`}>
+                            {order.status === "pending" && <Clock className="w-3 h-3" />}
+                            {order.status === "in_progress" && <Activity className="w-3 h-3" />}
+                            {order.status === "delivered" && <CheckCircle className="w-3 h-3" />}
+                            {order.status === "awaiting_payment" && <CreditCard className="w-3 h-3" />}
+                            {order.status === "failed" && <AlertCircle className="w-3 h-3" />}
+                            {order.status.replace(/_/g, " ")}
+                          </span>
+                        </td>
+                        <td className="px-6 py-4 text-gray-300">{fmtAmount(order.upfront_amount)}</td>
+                        <td className="px-6 py-4 text-gray-300">{fmtAmount(order.balance_amount)}</td>
+                        <td className="px-6 py-4 text-gray-400 text-sm">{fmtDate(order.created_at)}</td>
+                        <td className="px-6 py-4">
+                          <div className="flex items-center justify-end gap-1">
+                            {/* Status quick-change */}
+                            {order.status === "pending" && (
+                              <button
+                                onClick={() => handleStatusChange(order, "in_progress")}
+                                disabled={actionLoading === order.id}
+                                className="px-2 py-1 text-xs bg-blue-500/20 text-blue-400 rounded hover:bg-blue-500/30 transition"
+                                title="Mark In Progress"
+                              >
+                                {actionLoading === order.id ? <Loader className="w-3 h-3 animate-spin" /> : "Start"}
+                              </button>
+                            )}
+                            {(order.status === "in_progress" || order.status === "pending") && (
+                              <button
+                                onClick={() => handleDeliver(order)}
+                                disabled={actionLoading === order.id}
+                                className="px-2 py-1 text-xs bg-green-500/20 text-green-400 rounded hover:bg-green-500/30 transition flex items-center gap-1"
+                                title="Mark Delivered + Send balance link"
+                              >
+                                {actionLoading === order.id ? (
+                                  <Loader className="w-3 h-3 animate-spin" />
+                                ) : (
+                                  <><Truck className="w-3 h-3" /> Deliver</>
+                                )}
+                              </button>
+                            )}
+                            {order.github_repo && (
+                              <a
+                                href={order.github_repo}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="p-1.5 hover:bg-white/10 rounded text-gray-400 hover:text-white"
+                                title="View repo"
+                              >
+                                <ExternalLink className="w-4 h-4" />
+                              </a>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
         )}
 
-        {/* Credits Tab */}
+        {/* ── Credits Tab ── */}
         {activeTab === "credits" && (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div className="bg-white/5 border border-white/10 rounded-2xl p-6">
@@ -290,75 +533,85 @@ export default function AdminDashboard() {
               <div className="space-y-4">
                 <div className="flex items-center justify-between p-4 bg-green-500/10 border border-green-500/30 rounded-xl">
                   <span className="text-gray-300">Total Credits in Circulation</span>
-                  <span className="text-2xl font-bold text-green-400">{users.reduce((a, u) => a + u.credits, 0)}</span>
+                  <span className="text-2xl font-bold text-green-400">
+                    {users.reduce((a, u) => a + (u.credits || 0), 0)}
+                  </span>
                 </div>
                 <div className="flex items-center justify-between p-4 bg-blue-500/10 border border-blue-500/30 rounded-xl">
-                  <span className="text-gray-300">Used This Month</span>
-                  <span className="text-2xl font-bold text-blue-400">47</span>
+                  <span className="text-gray-300">Users With Credits</span>
+                  <span className="text-2xl font-bold text-blue-400">
+                    {users.filter((u) => (u.credits || 0) > 0).length}
+                  </span>
                 </div>
               </div>
             </div>
             <div className="bg-white/5 border border-white/10 rounded-2xl p-6">
-              <h3 className="text-lg font-bold mb-4">Quick Actions</h3>
-              <div className="space-y-3">
-                <button className="w-full bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl p-4 text-left transition flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <Plus className="w-5 h-5 text-green-400" />
-                    <span>Add Credits to User</span>
-                  </div>
-                  <span className="text-gray-500">→</span>
-                </button>
-                <button className="w-full bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl p-4 text-left transition flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <Minus className="w-5 h-5 text-red-400" />
-                    <span>Remove Credits from User</span>
-                  </div>
-                  <span className="text-gray-500">→</span>
-                </button>
-                <button className="w-full bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl p-4 text-left transition flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <CreditCard className="w-5 h-5 text-blue-400" />
-                    <span>Bulk Credit Operations</span>
-                  </div>
-                  <span className="text-gray-500">→</span>
-                </button>
+              <h3 className="text-lg font-bold mb-4">Top Credit Holders</h3>
+              <div className="space-y-2">
+                {users
+                  .filter((u) => (u.credits || 0) > 0)
+                  .sort((a, b) => (b.credits || 0) - (a.credits || 0))
+                  .slice(0, 5)
+                  .map((u) => (
+                    <div key={u.id} className="flex items-center justify-between p-3 bg-white/5 rounded-lg">
+                      <div>
+                        <p className="text-sm text-white">{u.name || u.email}</p>
+                        <p className="text-xs text-gray-400">{u.email}</p>
+                      </div>
+                      <span className="text-green-400 font-bold">{u.credits} cr</span>
+                    </div>
+                  ))}
+                {users.filter((u) => (u.credits || 0) > 0).length === 0 && (
+                  <p className="text-gray-500 text-sm">No users have credits yet</p>
+                )}
               </div>
             </div>
           </div>
         )}
 
-        {/* Revenue Tab */}
+        {/* ── Revenue Tab ── */}
         {activeTab === "revenue" && (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div className="bg-white/5 border border-white/10 rounded-2xl p-6">
               <h3 className="text-lg font-bold mb-4">Revenue Breakdown</h3>
               <div className="space-y-4">
                 <div className="flex items-center justify-between p-4 bg-green-500/10 border border-green-500/30 rounded-xl">
-                  <span className="text-gray-300">Total Revenue</span>
-                  <span className="text-2xl font-bold text-green-400">$45,680</span>
+                  <span className="text-gray-300">Total Upfront Collected</span>
+                  <span className="text-2xl font-bold text-green-400">{fmtAmount(totalRevenue)}</span>
                 </div>
                 <div className="flex items-center justify-between p-4 bg-blue-500/10 border border-blue-500/30 rounded-xl">
                   <span className="text-gray-300">This Month</span>
-                  <span className="text-2xl font-bold text-blue-400">$8,920</span>
+                  <span className="text-2xl font-bold text-blue-400">{fmtAmount(thisMonthRevenue)}</span>
                 </div>
                 <div className="flex items-center justify-between p-4 bg-purple-500/10 border border-purple-500/30 rounded-xl">
-                  <span className="text-gray-300">Average Order Value</span>
-                  <span className="text-2xl font-bold text-purple-400">$195</span>
+                  <span className="text-gray-300">Pending Balance Revenue</span>
+                  <span className="text-2xl font-bold text-purple-400">
+                    {fmtAmount(
+                      orders
+                        .filter((o) => o.status === "awaiting_payment")
+                        .reduce((s, o) => s + (o.balance_amount || 0), 0)
+                    )}
+                  </span>
                 </div>
               </div>
             </div>
             <div className="bg-white/5 border border-white/10 rounded-2xl p-6">
-              <h3 className="text-lg font-bold mb-4">Recent Transactions</h3>
+              <h3 className="text-lg font-bold mb-4">Recent Orders</h3>
               <div className="space-y-3">
-                {orders.filter(o => o.status !== "refunded").map((order) => (
+                {orders.slice(0, 8).map((order) => (
                   <div key={order.id} className="flex items-center justify-between p-3 bg-white/5 rounded-lg">
                     <div>
-                      <p className="text-sm text-white">{order.user}</p>
-                      <p className="text-xs text-gray-400">{order.tier} • {order.status}</p>
+                      <p className="text-sm text-white">{order.users?.email || "—"}</p>
+                      <p className="text-xs text-gray-400">{order.tier} · {order.status.replace(/_/g, " ")}</p>
                     </div>
-                    <span className="text-green-400 font-medium">+${order.amount}</span>
+                    <span className="text-green-400 font-medium text-sm">
+                      +{fmtAmount(order.upfront_amount)}
+                    </span>
                   </div>
                 ))}
+                {orders.length === 0 && (
+                  <p className="text-gray-500 text-sm">No orders yet</p>
+                )}
               </div>
             </div>
           </div>
@@ -367,32 +620,32 @@ export default function AdminDashboard() {
 
       {/* Credit Modal */}
       {showCreditModal && selectedUser && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50">
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4">
           <div className="bg-[#1a1a2e] border border-white/10 rounded-2xl p-6 w-full max-w-md">
             <div className="flex items-center justify-between mb-6">
               <h3 className="text-lg font-bold">
                 {creditAction === "add" ? "Add" : "Remove"} Credits
               </h3>
-              <button 
-                onClick={() => setShowCreditModal(false)}
-                className="text-gray-400 hover:text-white"
-              >
+              <button onClick={() => setShowCreditModal(false)} className="text-gray-400 hover:text-white">
                 <X className="w-5 h-5" />
               </button>
             </div>
-            <p className="text-gray-400 mb-4">
-              {creditAction === "add" ? "Adding" : "Removing"} credits for <strong className="text-white">{selectedUser.name}</strong>
+            <p className="text-gray-400 mb-2">
+              {creditAction === "add" ? "Adding credits to" : "Removing credits from"}{" "}
+              <strong className="text-white">{selectedUser.name || selectedUser.email}</strong>
             </p>
             <p className="text-sm text-gray-500 mb-4">
-              Current balance: <span className="text-white font-medium">{selectedUser.credits} credits</span>
+              Current balance:{" "}
+              <span className="text-white font-medium">{selectedUser.credits || 0} credits</span>
             </p>
             <div className="mb-6">
               <label className="block text-sm font-medium text-gray-300 mb-2">Amount</label>
               <input
                 type="number"
                 min="1"
+                max="100"
                 value={creditAmount}
-                onChange={(e) => setCreditAmount(parseInt(e.target.value) || 0)}
+                onChange={(e) => setCreditAmount(Math.max(1, parseInt(e.target.value) || 1))}
                 className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-blue-500/50"
               />
             </div>
@@ -405,12 +658,14 @@ export default function AdminDashboard() {
               </button>
               <button
                 onClick={handleCreditChange}
-                className={`flex-1 py-3 rounded-xl font-bold transition ${
+                disabled={!!actionLoading}
+                className={`flex-1 py-3 rounded-xl font-bold transition flex items-center justify-center gap-2 ${
                   creditAction === "add"
                     ? "bg-green-500 hover:bg-green-400 text-black"
                     : "bg-red-500 hover:bg-red-400 text-white"
-                }`}
+                } disabled:opacity-50`}
               >
+                {actionLoading ? <Loader className="w-4 h-4 animate-spin" /> : null}
                 {creditAction === "add" ? "Add Credits" : "Remove Credits"}
               </button>
             </div>
@@ -421,7 +676,17 @@ export default function AdminDashboard() {
   );
 }
 
-function StatCard({ icon, label, value, sublabel }: { icon: React.ReactNode; label: string; value: string; sublabel: string }) {
+function StatCard({
+  icon,
+  label,
+  value,
+  sublabel,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  value: string;
+  sublabel: string;
+}) {
   return (
     <div className="bg-white/5 border border-white/10 rounded-2xl p-4">
       <div className="flex items-center gap-3 mb-3">

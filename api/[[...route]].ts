@@ -1,16 +1,16 @@
 /**
- * Vercel serverless function — catch-all for /api/* routes
- * Wraps the Hono app using the official hono/vercel adapter.
- *
- * Node.js 20.x runtime (set in Vercel project settings or via config below)
- * maxDuration: 300s — allows long Claude streaming responses
+ * Vercel serverless function — catch-all for /api/* routes.
+ * Uses @hono/node-server's getRequestListener for proper Node.js compatibility.
+ * This supports streaming (SSE), all Node.js APIs, Stripe, Anthropic, Supabase.
  */
-import { handle } from "hono/vercel";
+import { getRequestListener } from "@hono/node-server";
 import app from "../src/api/index";
 
-// This config is read by Vercel's build system
+// Vercel function config
 export const config = {
   maxDuration: 300,
 };
 
-export default handle(app);
+// Export as default Node.js HTTP request handler
+// This signature (IncomingMessage, ServerResponse) is what Vercel's Node.js runtime calls
+export default getRequestListener(app);

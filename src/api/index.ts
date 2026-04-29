@@ -290,7 +290,7 @@ app.post("/api/stripe/webhook", async (c) => {
 
   const stripe = getStripe();
 
-  let event: Stripe.Event;
+  let event: any;
   try {
     event = stripe.webhooks.constructEvent(body, sig, webhookSecret);
   } catch (err: any) {
@@ -302,7 +302,7 @@ app.post("/api/stripe/webhook", async (c) => {
 
   try {
     if (event.type === "checkout.session.completed") {
-      const session = event.data.object as Stripe.CheckoutSession;
+      const session = event.data.object as any;
       const { tier, userName, projectDescription, projectUrl } = session.metadata || {};
       const email = session.customer_email || "";
 
@@ -371,7 +371,7 @@ app.post("/api/stripe/webhook", async (c) => {
     }
 
     if (event.type === "checkout.session.completed") {
-      const session = event.data.object as Stripe.CheckoutSession;
+      const session = event.data.object as any;
       // Handle balance payment completion
       if (session.metadata?.type === "balance" && session.metadata?.orderId) {
         await supabase

@@ -88,11 +88,13 @@ app.post("/api/agent/session", async (c) => {
       .single();
 
     // Create session record
+    // NOTE: agent_sessions table uses project_name and started_at (not title/created_at)
     const { data: session, error } = await supabase
       .from("agent_sessions")
       .insert({
         user_id: user?.id || null,
-        title: `Session for ${userEmail}`,
+        project_name: `Session for ${userEmail}`,
+        started_at: new Date().toISOString(),
       })
       .select()
       .single();
@@ -150,7 +152,7 @@ app.post("/api/agent/message", async (c) => {
     .eq("session_id", sessionId)
     .order("created_at", { ascending: true });
 
-  // Build Claude messages (skip the initial greeting context message)
+  // Build Claude messages
   const claudeMessages: { role: "user" | "assistant"; content: string }[] = (history || []).map(
     (m: any) => ({
       role: m.role === "agent" ? ("assistant" as const) : ("user" as const),
@@ -303,9 +305,19 @@ app.post("/api/stripe/webhook", async (c) => {
   try {
     if (event.type === "checkout.session.completed") {
       const session = event.data.object as any;
-      const { tier, userName, projectDescription, projectUrl } = session.metadata || {};
+      const { tier, userName, projectDescription, projectUrl, type, orderId } = session.metadata || {};
       const email = session.customer_email || "";
 
+      // Handle balance payment completion
+      if (type === "balance" && orderId) {
+        await supabase
+          .from("projects")
+          .update({ status: "delivered", balance_payment_id: session.payment_intent as string })
+          .eq("id", orderId);
+        return c.json({ received: true });
+      }
+
+      // Handle upfront payment (new customer signup)
       if (!email) {
         console.error("Webhook: no email in session");
         return c.json({ received: true });
@@ -367,17 +379,6 @@ app.post("/api/stripe/webhook", async (c) => {
         await supabase.auth.admin.generateLink({ type: "magiclink", email });
       } catch (linkErr) {
         console.error("Magic link error (non-fatal):", linkErr);
-      }
-    }
-
-    if (event.type === "checkout.session.completed") {
-      const session = event.data.object as any;
-      // Handle balance payment completion
-      if (session.metadata?.type === "balance" && session.metadata?.orderId) {
-        await supabase
-          .from("projects")
-          .update({ status: "delivered", balance_payment_id: session.payment_intent as string })
-          .eq("id", session.metadata.orderId);
       }
     }
   } catch (err) {
@@ -481,11 +482,11 @@ app.get("/api/admin/stats", requireAdmin, async (c) => {
     .filter((p) => new Date(p.created_at) >= monthStart)
     .reduce((s, p) => s + (p.upfront_amount || 0), 0);
 
-  // Count active sessions in last 24h
+  // Count active sessions in last 24h — uses started_at column
   const { count: activeSessions } = await supabase
     .from("agent_sessions")
     .select("id", { count: "exact", head: true })
-    .gte("created_at", new Date(Date.now() - 86400000).toISOString());
+    .gte("started_at", new Date(Date.now() - 86400000).toISOString());
 
   return c.json({
     total_users: usersRes.count || 0,
@@ -507,11 +508,18 @@ app.get("/api/admin/users", requireAdmin, async (c) => {
 
   const { data: users, error } = await supabase
     .from("users")
-    .select("id, email, name, role, created_at, projects(id, status, upfront_amount)")
+    .select("id, email, name, role, sites_rescued, created_at, projects(id, status, upfront_amount)")
     .order("created_at", { ascending: false });
 
   if (error) return c.json({ error: error.message }, 500);
-  return c.json({ users: users || [] });
+
+  // Normalize: expose sites_rescued as credits for the admin UI
+  const normalized = (users || []).map((u: any) => ({
+    ...u,
+    credits: u.sites_rescued ?? 0,
+  }));
+
+  return c.json({ users: normalized });
 });
 
 // ────────────────────────────────────────────────────────────
@@ -594,8 +602,6 @@ app.post("/api/admin/orders/:id/deliver", requireAdmin, async (c) => {
       metadata: { type: "balance", orderId, tier: order.tier },
     });
 
-    // Send balance payment link to customer via email (would need email service)
-    // For now, return the URL so admin can send it manually
     const balanceUrl = `${origin}/pay-balance?order_id=${orderId}&tier=${order.tier.toLowerCase()}&email=${encodeURIComponent(customerEmail)}`;
 
     return c.json({ success: true, checkoutUrl: session.url, balanceUrl });
@@ -606,23 +612,24 @@ app.post("/api/admin/orders/:id/deliver", requireAdmin, async (c) => {
 
 // ────────────────────────────────────────────────────────────
 // ADMIN — POST /api/admin/users/:id/credits
+// Uses sites_rescued column as the credits store
 // ────────────────────────────────────────────────────────────
 app.post("/api/admin/users/:id/credits", requireAdmin, async (c) => {
   const userId = c.req.param("id");
   const { action, amount } = await c.req.json();
   const supabase = supabaseAdmin();
 
-  // Get current credits
+  // sites_rescued is the persistent credits field available in this schema
   const { data: user } = await supabase
     .from("users")
-    .select("credits")
+    .select("sites_rescued")
     .eq("id", userId)
     .single();
 
-  const current = (user as any)?.credits || 0;
+  const current = (user as any)?.sites_rescued || 0;
   const next = action === "add" ? current + amount : Math.max(0, current - amount);
 
-  const { error } = await supabase.from("users").update({ credits: next }).eq("id", userId);
+  const { error } = await supabase.from("users").update({ sites_rescued: next }).eq("id", userId);
   if (error) return c.json({ error: error.message }, 500);
 
   return c.json({ success: true, credits: next });

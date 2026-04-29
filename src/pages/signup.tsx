@@ -280,12 +280,18 @@ export default function SignupPage() {
 
         <p className="text-center text-gray-600 text-xs mt-6">
           By continuing, you agree to our{" "}
-          <a href="#" className="text-blue-400 hover:text-blue-300">
-            Terms of Service
-          </a>{" "}
-          and{" "}
-          <a href="#" className="text-blue-400 hover:text-blue-300">
-            Privacy Policy
+          <a
+            href="mailto:support@codeexpertagent.com"
+            className="text-blue-400 hover:text-blue-300"
+          >
+            Terms &amp; Privacy
+          </a>
+          . Questions?{" "}
+          <a
+            href="mailto:support@codeexpertagent.com"
+            className="text-blue-400 hover:text-blue-300"
+          >
+            Contact us
           </a>
           .
         </p>

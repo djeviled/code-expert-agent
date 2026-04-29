@@ -46,11 +46,9 @@ app.post("/api/auth/login", async (c) => {
 
     const supabase = supabaseAdmin();
 
-    // Sign in via Supabase Auth
     const { data, error } = await supabase.auth.signInWithPassword({ email, password });
     if (error || !data.user) return c.json({ error: "Invalid email or password" }, 401);
 
-    // Get user profile
     const { data: profile } = await supabase
       .from("users")
       .select("*")
@@ -78,6 +76,7 @@ app.post("/api/auth/login", async (c) => {
 // ────────────────────────────────────────────────────────────
 // AGENT — POST /api/agent/session
 // Creates a session and returns greeting
+// NOTE: DB uses project_name + started_at (not title/created_at)
 // ────────────────────────────────────────────────────────────
 app.post("/api/agent/session", async (c) => {
   try {
@@ -86,19 +85,19 @@ app.post("/api/agent/session", async (c) => {
 
     const supabase = supabaseAdmin();
 
-    // Get user profile
     const { data: user } = await supabase
       .from("users")
       .select("*")
       .eq("email", userEmail)
       .single();
 
-    // Create session record
+    // Use project_name (actual column) and started_at (actual timestamp column)
     const { data: session, error } = await supabase
       .from("agent_sessions")
       .insert({
         user_id: user?.id || null,
-        title: `Session for ${userEmail}`,
+        project_name: `Session for ${userEmail}`,
+        started_at: new Date().toISOString(),
       })
       .select()
       .single();
@@ -117,7 +116,6 @@ app.post("/api/agent/session", async (c) => {
       `3. What platform are you deploying to? (Vercel, Netlify, Railway, etc.)\n\n` +
       `I'll analyze everything systematically and fix it. No code left behind. 🚀`;
 
-    // Store greeting as first message
     await supabase.from("agent_messages").insert({
       session_id: session.id,
       role: "agent",
@@ -142,21 +140,18 @@ app.post("/api/agent/message", async (c) => {
   const supabase = supabaseAdmin();
   const anthropic = getAnthropic();
 
-  // Store user message
   await supabase.from("agent_messages").insert({
     session_id: sessionId,
     role: "user",
     content: message,
   });
 
-  // Get conversation history
   const { data: history } = await supabase
     .from("agent_messages")
     .select("role, content")
     .eq("session_id", sessionId)
     .order("created_at", { ascending: true });
 
-  // Build Claude messages (skip the initial greeting context message)
   const claudeMessages: { role: "user" | "assistant"; content: string }[] = (history || []).map(
     (m: any) => ({
       role: m.role === "agent" ? ("assistant" as const) : ("user" as const),
@@ -221,7 +216,6 @@ You never give up. You dig deeper. You ship working code.`,
           }
         }
 
-        // Save full response to DB
         await supabase.from("agent_messages").insert({
           session_id: sessionId,
           role: "agent",
@@ -309,15 +303,28 @@ app.post("/api/stripe/webhook", async (c) => {
   try {
     if (event.type === "checkout.session.completed") {
       const session = event.data.object as any;
-      const { tier, userName, projectDescription, projectUrl } = session.metadata || {};
+      const { tier, userName, projectDescription, projectUrl, type, orderId } =
+        session.metadata || {};
       const email = session.customer_email || "";
 
+      // ── Balance payment completion ──
+      if (type === "balance" && orderId) {
+        await supabase
+          .from("projects")
+          .update({
+            status: "delivered",
+            balance_payment_id: session.payment_intent as string,
+          })
+          .eq("id", orderId);
+        return c.json({ received: true });
+      }
+
+      // ── New upfront payment / customer signup ──
       if (!email) {
         console.error("Webhook: no email in session");
         return c.json({ received: true });
       }
 
-      // Find or create Supabase auth user
       let userId: string | undefined;
       const { data: listData } = await supabase.auth.admin.listUsers({ perPage: 1000 });
       const existing = listData?.users?.find((u) => u.email === email);
@@ -339,24 +346,20 @@ app.post("/api/stripe/webhook", async (c) => {
 
       if (!userId) return c.json({ received: true });
 
-      // Map tier to role
       const roleMap: Record<string, string> = { tier1: "SITE", tier2: "CODE", bundle: "BUNDLE" };
       const role = roleMap[tier || "tier1"] || "SITE";
 
-      // Upsert user profile
       await supabase.from("users").upsert(
         { id: userId, email, name: userName || email.split("@")[0], role },
         { onConflict: "id" }
       );
 
-      // Balance amounts per tier
       const balanceAmounts: Record<string, number> = {
         SITE: 9900,
         CODE: 14900,
         BUNDLE: 14900,
       };
 
-      // Create project
       await supabase.from("projects").insert({
         user_id: userId,
         tier: role,
@@ -368,22 +371,10 @@ app.post("/api/stripe/webhook", async (c) => {
         status: "pending",
       });
 
-      // Send magic link so customer can set password & log in
       try {
         await supabase.auth.admin.generateLink({ type: "magiclink", email });
       } catch (linkErr) {
         console.error("Magic link error (non-fatal):", linkErr);
-      }
-    }
-
-    if (event.type === "checkout.session.completed") {
-      const session = event.data.object as any;
-      // Handle balance payment completion
-      if (session.metadata?.type === "balance" && session.metadata?.orderId) {
-        await supabase
-          .from("projects")
-          .update({ status: "delivered", balance_payment_id: session.payment_intent as string })
-          .eq("id", session.metadata.orderId);
       }
     }
   } catch (err) {
@@ -395,7 +386,6 @@ app.post("/api/stripe/webhook", async (c) => {
 
 // ────────────────────────────────────────────────────────────
 // PAYMENTS — POST /api/payments/balance-checkout
-// Customer-facing: create Stripe checkout for balance payment
 // ────────────────────────────────────────────────────────────
 app.post("/api/payments/balance-checkout", async (c) => {
   try {
@@ -487,11 +477,11 @@ app.get("/api/admin/stats", requireAdmin, async (c) => {
     .filter((p) => new Date(p.created_at) >= monthStart)
     .reduce((s, p) => s + (p.upfront_amount || 0), 0);
 
-  // Count active sessions in last 24h
+  // agent_sessions uses started_at (not created_at)
   const { count: activeSessions } = await supabase
     .from("agent_sessions")
     .select("id", { count: "exact", head: true })
-    .gte("created_at", new Date(Date.now() - 86400000).toISOString());
+    .gte("started_at", new Date(Date.now() - 86400000).toISOString());
 
   return c.json({
     total_users: usersRes.count || 0,
@@ -511,13 +501,21 @@ app.get("/api/admin/stats", requireAdmin, async (c) => {
 app.get("/api/admin/users", requireAdmin, async (c) => {
   const supabase = supabaseAdmin();
 
+  // sites_rescued is the integer field that maps to "credits" in the admin UI
   const { data: users, error } = await supabase
     .from("users")
-    .select("id, email, name, role, created_at, projects(id, status, upfront_amount)")
+    .select("id, email, name, role, sites_rescued, created_at, projects(id, status, upfront_amount)")
     .order("created_at", { ascending: false });
 
   if (error) return c.json({ error: error.message }, 500);
-  return c.json({ users: users || [] });
+
+  // Expose sites_rescued as credits for the admin panel
+  const normalized = (users || []).map((u: any) => ({
+    ...u,
+    credits: u.sites_rescued ?? 0,
+  }));
+
+  return c.json({ users: normalized });
 });
 
 // ────────────────────────────────────────────────────────────
@@ -537,7 +535,6 @@ app.get("/api/admin/orders", requireAdmin, async (c) => {
 
 // ────────────────────────────────────────────────────────────
 // ADMIN — POST /api/admin/orders/:id/status
-// Update order status
 // ────────────────────────────────────────────────────────────
 app.post("/api/admin/orders/:id/status", requireAdmin, async (c) => {
   const orderId = c.req.param("id");
@@ -546,7 +543,10 @@ app.post("/api/admin/orders/:id/status", requireAdmin, async (c) => {
 
   const { error } = await supabase
     .from("projects")
-    .update({ status, ...(status === "delivered" ? { delivered_at: new Date().toISOString() } : {}) })
+    .update({
+      status,
+      ...(status === "delivered" ? { delivered_at: new Date().toISOString() } : {}),
+    })
     .eq("id", orderId);
 
   if (error) return c.json({ error: error.message }, 500);
@@ -555,7 +555,6 @@ app.post("/api/admin/orders/:id/status", requireAdmin, async (c) => {
 
 // ────────────────────────────────────────────────────────────
 // ADMIN — POST /api/admin/orders/:id/deliver
-// Mark delivered + create balance checkout
 // ────────────────────────────────────────────────────────────
 app.post("/api/admin/orders/:id/deliver", requireAdmin, async (c) => {
   const orderId = c.req.param("id");
@@ -570,15 +569,12 @@ app.post("/api/admin/orders/:id/deliver", requireAdmin, async (c) => {
 
   if (orderErr || !order) return c.json({ error: "Order not found" }, 404);
 
-  // Update status to awaiting payment
   await supabase
     .from("projects")
     .update({ status: "awaiting_payment", delivered_at: new Date().toISOString() })
     .eq("id", orderId);
 
-  const origin =
-    c.req.header("origin") ||
-    "https://code-expert-agent.vercel.app";
+  const origin = c.req.header("origin") || "https://code-expert-agent.vercel.app";
 
   const balancePriceIds: Record<string, string> = {
     SITE: process.env.STRIPE_SITE_BALANCE_PRICE_ID || "price_1TQt0aGusAHZYXWWVlliF9Qd",
@@ -600,8 +596,6 @@ app.post("/api/admin/orders/:id/deliver", requireAdmin, async (c) => {
       metadata: { type: "balance", orderId, tier: order.tier },
     });
 
-    // Send balance payment link to customer via email (would need email service)
-    // For now, return the URL so admin can send it manually
     const balanceUrl = `${origin}/pay-balance?order_id=${orderId}&tier=${order.tier.toLowerCase()}&email=${encodeURIComponent(customerEmail)}`;
 
     return c.json({ success: true, checkoutUrl: session.url, balanceUrl });
@@ -612,23 +606,27 @@ app.post("/api/admin/orders/:id/deliver", requireAdmin, async (c) => {
 
 // ────────────────────────────────────────────────────────────
 // ADMIN — POST /api/admin/users/:id/credits
+// Maps to sites_rescued column (credits column doesn't exist in this schema)
 // ────────────────────────────────────────────────────────────
 app.post("/api/admin/users/:id/credits", requireAdmin, async (c) => {
   const userId = c.req.param("id");
   const { action, amount } = await c.req.json();
   const supabase = supabaseAdmin();
 
-  // Get current credits
   const { data: user } = await supabase
     .from("users")
-    .select("credits")
+    .select("sites_rescued")
     .eq("id", userId)
     .single();
 
-  const current = (user as any)?.credits || 0;
+  const current = (user as any)?.sites_rescued || 0;
   const next = action === "add" ? current + amount : Math.max(0, current - amount);
 
-  const { error } = await supabase.from("users").update({ credits: next }).eq("id", userId);
+  const { error } = await supabase
+    .from("users")
+    .update({ sites_rescued: next })
+    .eq("id", userId);
+
   if (error) return c.json({ error: error.message }, 500);
 
   return c.json({ success: true, credits: next });
@@ -643,15 +641,13 @@ app.post("/api/admin/users/:id/freeze", requireAdmin, async (c) => {
   const supabase = supabaseAdmin();
 
   if (frozen) {
-    await supabase.auth.admin.updateUserById(userId, { ban_duration: "87600h" }); // ~10 years
+    await supabase.auth.admin.updateUserById(userId, { ban_duration: "87600h" });
   } else {
     await supabase.auth.admin.updateUserById(userId, { ban_duration: "none" });
   }
 
   return c.json({ success: true });
 });
-
-// app is used by handler below
 
 // ────────────────────────────────────────────────────────────
 // VERCEL HANDLER

@@ -1,17 +1,9 @@
-import { useState } from "react";
 import { Link } from "react-router-dom";
 import { Check, ArrowRight, Zap, Shield, Clock } from "lucide-react";
 
-// Direct Stripe Payment Links (pre-configured in Stripe dashboard)
-const UPFRONT_LINKS = {
-  site: "https://buy.stripe.com/fZu3cv2NLdht7Yt1CVcV200",
-  code: "https://buy.stripe.com/fZu28rdsp3GT92xbdvcV201",
-  bundle: "https://buy.stripe.com/00w00j5ZX4KX0w1dlDcV202",
-};
-
 const TIERS = [
   {
-    key: "site",
+    key: "tier1",
     name: "SITE Rescue",
     tagline: "Your AI-generated site, broken and stalled?",
     upfront: "$49",
@@ -24,10 +16,9 @@ const TIERS = [
       "Code delivered error-free",
     ],
     cta: "Start Site Rescue",
-    upfrontLink: UPFRONT_LINKS.site,
   },
   {
-    key: "code",
+    key: "tier2",
     name: "CODE Rescue",
     tagline: "Your code almost works — but won't compile?",
     upfront: "$79",
@@ -40,7 +31,6 @@ const TIERS = [
       "Code review report included",
     ],
     cta: "Start Code Rescue",
-    upfrontLink: UPFRONT_LINKS.code,
     highlighted: true,
   },
   {
@@ -57,7 +47,6 @@ const TIERS = [
       "Priority support",
     ],
     cta: "Start Bundle Rescue",
-    upfrontLink: UPFRONT_LINKS.bundle,
   },
 ];
 
@@ -83,8 +72,6 @@ const HOW_STEPS = [
 ];
 
 export default function LandingPage() {
-  const [, setHovered] = useState<string | null>(null);
-
   return (
     <div className="min-h-screen bg-[#0a0a1a] text-white">
       {/* Nav */}
@@ -198,7 +185,7 @@ export default function LandingPage() {
               <p className="text-blue-200/70 text-sm leading-relaxed">
                 You pay an upfront fee today. The balance is only charged if our agent successfully
                 delivers your code — deployed and working within 7 days. If it's not fixed, you
-                keep your upfront fee refunded, no questions asked.
+                get your upfront fee refunded, no questions asked.
               </p>
             </div>
           </div>
@@ -216,8 +203,6 @@ export default function LandingPage() {
           {TIERS.map((tier) => (
             <div
               key={tier.key}
-              onMouseEnter={() => setHovered(tier.key)}
-              onMouseLeave={() => setHovered(null)}
               className={`relative flex flex-col rounded-2xl p-7 transition-all duration-200 ${
                 tier.highlighted
                   ? "bg-gradient-to-b from-blue-500/20 to-white/5 border-2 border-blue-500/50 shadow-lg shadow-blue-500/10"
@@ -254,10 +239,9 @@ export default function LandingPage() {
                 ))}
               </ul>
 
-              <a
-                href={tier.upfrontLink}
-                target="_blank"
-                rel="noopener noreferrer"
+              {/* Route through signup flow for proper user creation */}
+              <Link
+                to={`/signup?tier=${tier.key}`}
                 className={`w-full py-3 rounded-xl font-bold text-center transition flex items-center justify-center gap-2 ${
                   tier.highlighted
                     ? "bg-gradient-to-r from-blue-500 to-cyan-400 text-black hover:opacity-90"
@@ -265,7 +249,7 @@ export default function LandingPage() {
                 }`}
               >
                 {tier.cta} <ArrowRight className="w-4 h-4" />
-              </a>
+              </Link>
             </div>
           ))}
         </div>

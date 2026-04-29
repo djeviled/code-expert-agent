@@ -377,8 +377,35 @@ app.post("/api/stripe/webhook", async (c) => {
         console.error("Magic link error (non-fatal):", linkErr);
       }
     }
+
+    // ── Subscription checkout completion → save customer ID + subscription ──
+    if (event.type === "checkout.session.completed") {
+      const session = event.data.object as any;
+      if (session.mode === "subscription" && session.metadata?.userId) {
+        await supabase.from("users").update({
+          stripe_customer_id: session.customer as string,
+          subscription_status: "active",
+          subscription_tier: session.metadata?.priceId?.includes("QsSE8sGn")
+            ? "monthly_priority"
+            : "monthly_single",
+          stripe_subscription_id: session.subscription as string,
+        }).eq("id", session.metadata.userId);
+      }
+    }
   } catch (err) {
     console.error("Webhook processing error:", err);
+  }
+
+  if (event.type === "customer.subscription.updated" || event.type === "customer.subscription.deleted") {
+    const sub = event.data.object as any;
+    try {
+      await supabaseAdmin().from("users").update({
+        subscription_status: event.type === "customer.subscription.deleted" ? "canceled" : sub.status,
+        ...(event.type === "customer.subscription.deleted" ? { stripe_subscription_id: null } : {}),
+      }).eq("stripe_customer_id", sub.customer);
+    } catch (e) {
+      console.error("Subscription webhook error:", e);
+    }
   }
 
   return c.json({ received: true });
@@ -483,6 +510,12 @@ app.get("/api/admin/stats", requireAdmin, async (c) => {
     .select("id", { count: "exact", head: true })
     .gte("started_at", new Date(Date.now() - 86400000).toISOString());
 
+  // Count active subscriptions
+  const { count: activeSubscriptions } = await supabase
+    .from("users")
+    .select("id", { count: "exact", head: true })
+    .eq("subscription_status", "active");
+
   return c.json({
     total_users: usersRes.count || 0,
     active_users: usersRes.count || 0,
@@ -492,6 +525,7 @@ app.get("/api/admin/stats", requireAdmin, async (c) => {
     total_revenue: totalRevenue,
     this_month_revenue: monthRevenue,
     active_sessions: activeSessions || 0,
+    active_subscriptions: activeSubscriptions || 0,
   });
 });
 
@@ -648,6 +682,328 @@ app.post("/api/admin/users/:id/freeze", requireAdmin, async (c) => {
 
   return c.json({ success: true });
 });
+
+// ────────────────────────────────────────────────────────────
+// USER — GET /api/user/dashboard
+// Returns user profile + projects + subscription status
+// ────────────────────────────────────────────────────────────
+app.get("/api/user/dashboard", async (c) => {
+  const authHeader = c.req.header("authorization") || "";
+  if (!authHeader.startsWith("Bearer ")) return c.json({ error: "Unauthorized" }, 401);
+  const token = authHeader.slice(7);
+
+  const supabase = supabaseAdmin();
+  const { data: { user }, error } = await supabase.auth.getUser(token);
+  if (error || !user) return c.json({ error: "Unauthorized" }, 401);
+
+  const { data: profile } = await supabase
+    .from("users")
+    .select("id, email, name, role, subscription_status, subscription_tier, stripe_subscription_id")
+    .eq("id", user.id)
+    .single();
+
+  const { data: projects } = await supabase
+    .from("projects")
+    .select("id, tier, status, upfront_amount, balance_amount, description, github_repo, site_url, created_at, delivered_at")
+    .eq("user_id", user.id)
+    .order("created_at", { ascending: false });
+
+  return c.json({ user: profile || {}, projects: projects || [] });
+});
+
+// ────────────────────────────────────────────────────────────
+// USER — POST /api/user/refund-request
+// Submit a refund request
+// ────────────────────────────────────────────────────────────
+app.post("/api/user/refund-request", async (c) => {
+  const authHeader = c.req.header("authorization") || "";
+  if (!authHeader.startsWith("Bearer ")) return c.json({ error: "Unauthorized" }, 401);
+  const token = authHeader.slice(7);
+
+  const supabase = supabaseAdmin();
+  const { data: { user }, error } = await supabase.auth.getUser(token);
+  if (error || !user) return c.json({ error: "Unauthorized" }, 401);
+
+  const { projectId, reason } = await c.req.json();
+  if (!projectId || !reason?.trim()) return c.json({ error: "Project ID and reason are required" }, 400);
+
+  // Verify project belongs to this user
+  const { data: project } = await supabase
+    .from("projects")
+    .select("id, status, user_id")
+    .eq("id", projectId)
+    .eq("user_id", user.id)
+    .single();
+
+  if (!project) return c.json({ error: "Project not found" }, 404);
+
+  // Store refund request in admin_notes table (with type prefix)
+  const { error: insertErr } = await supabase.from("admin_notes").insert({
+    user_id: user.id,
+    project_id: projectId,
+    note: JSON.stringify({ type: "refund_request", reason, status: "pending", submitted_at: new Date().toISOString() }),
+  });
+
+  if (insertErr) return c.json({ error: insertErr.message }, 500);
+  return c.json({ success: true });
+});
+
+// ────────────────────────────────────────────────────────────
+// STRIPE — POST /api/stripe/subscribe
+// Create a subscription checkout session
+// ────────────────────────────────────────────────────────────
+app.post("/api/stripe/subscribe", async (c) => {
+  const authHeader = c.req.header("authorization") || "";
+  if (!authHeader.startsWith("Bearer ")) return c.json({ error: "Unauthorized" }, 401);
+  const token = authHeader.slice(7);
+
+  const supabase = supabaseAdmin();
+  const { data: { user }, error } = await supabase.auth.getUser(token);
+  if (error || !user) return c.json({ error: "Unauthorized" }, 401);
+
+  const { priceId } = await c.req.json();
+  if (!priceId) return c.json({ error: "priceId required" }, 400);
+
+  const { data: profile } = await supabase
+    .from("users")
+    .select("email, stripe_customer_id")
+    .eq("id", user.id)
+    .single();
+
+  const stripe = getStripe();
+  const origin = c.req.header("origin") || "https://code-expert-agent.vercel.app";
+
+  try {
+    const sessionParams: any = {
+      payment_method_types: ["card"],
+      line_items: [{ price: priceId, quantity: 1 }],
+      mode: "subscription",
+      success_url: `${origin}/dashboard?subscribed=true`,
+      cancel_url: `${origin}/dashboard`,
+      customer_email: profile?.email || user.email,
+      metadata: { userId: user.id, priceId },
+    };
+
+    if (profile?.stripe_customer_id) {
+      sessionParams.customer = profile.stripe_customer_id;
+      delete sessionParams.customer_email;
+    }
+
+    const session = await stripe.checkout.sessions.create(sessionParams);
+    return c.json({ url: session.url });
+  } catch (err: any) {
+    return c.json({ error: err.message }, 500);
+  }
+});
+
+// ────────────────────────────────────────────────────────────
+// STRIPE — POST /api/stripe/portal
+// Create Stripe billing portal session
+// ────────────────────────────────────────────────────────────
+app.post("/api/stripe/portal", async (c) => {
+  const authHeader = c.req.header("authorization") || "";
+  if (!authHeader.startsWith("Bearer ")) return c.json({ error: "Unauthorized" }, 401);
+  const token = authHeader.slice(7);
+
+  const supabase = supabaseAdmin();
+  const { data: { user }, error } = await supabase.auth.getUser(token);
+  if (error || !user) return c.json({ error: "Unauthorized" }, 401);
+
+  const { data: profile } = await supabase
+    .from("users")
+    .select("stripe_customer_id, email")
+    .eq("id", user.id)
+    .single();
+
+  if (!profile?.stripe_customer_id) {
+    return c.json({ error: "No billing account found. Please subscribe first." }, 400);
+  }
+
+  const stripe = getStripe();
+  const origin = c.req.header("origin") || "https://code-expert-agent.vercel.app";
+
+  try {
+    const session = await stripe.billingPortal.sessions.create({
+      customer: profile.stripe_customer_id,
+      return_url: `${origin}/dashboard`,
+    });
+    return c.json({ url: session.url });
+  } catch (err: any) {
+    return c.json({ error: err.message }, 500);
+  }
+});
+
+// ────────────────────────────────────────────────────────────
+// ADMIN — GET /api/admin/refund-requests
+// ────────────────────────────────────────────────────────────
+app.get("/api/admin/refund-requests", requireAdmin, async (c) => {
+  const supabase = supabaseAdmin();
+
+  const { data: notes, error } = await supabase
+    .from("admin_notes")
+    .select("id, user_id, project_id, note, created_at, users(email, name), projects(tier, upfront_amount)")
+    .order("created_at", { ascending: false });
+
+  if (error) return c.json({ error: error.message }, 500);
+
+  // Filter to only refund request notes and parse JSON
+  const requests = (notes || [])
+    .filter((n: any) => {
+      try { return JSON.parse(n.note).type === "refund_request"; } catch { return false; }
+    })
+    .map((n: any) => {
+      const parsed = JSON.parse(n.note);
+      return {
+        id: n.id,
+        user_id: n.user_id,
+        project_id: n.project_id,
+        reason: parsed.reason,
+        status: parsed.status || "pending",
+        created_at: n.created_at,
+        users: n.users,
+        projects: n.projects,
+      };
+    });
+
+  return c.json({ requests });
+});
+
+// ────────────────────────────────────────────────────────────
+// ADMIN — POST /api/admin/refund-requests/:id/approve
+// Issue Stripe refund + mark resolved
+// ────────────────────────────────────────────────────────────
+app.post("/api/admin/refund-requests/:id/approve", requireAdmin, async (c) => {
+  const noteId = c.req.param("id");
+  const supabase = supabaseAdmin();
+  const stripe = getStripe();
+
+  const { data: note } = await supabase
+    .from("admin_notes")
+    .select("*, projects(upfront_payment_id, upfront_amount)")
+    .eq("id", noteId)
+    .single();
+
+  if (!note) return c.json({ error: "Not found" }, 404);
+
+  try {
+    const paymentIntentId = (note.projects as any)?.upfront_payment_id;
+    if (paymentIntentId) {
+      // Issue Stripe refund
+      await stripe.refunds.create({ payment_intent: paymentIntentId });
+    }
+
+    // Update note status
+    const parsed = JSON.parse(note.note);
+    await supabase.from("admin_notes").update({
+      note: JSON.stringify({ ...parsed, status: "approved", resolved_at: new Date().toISOString() }),
+    }).eq("id", noteId);
+
+    // Update project status to reflect refunded
+    if (note.project_id) {
+      await supabase.from("projects").update({ status: "failed" }).eq("id", note.project_id);
+    }
+
+    return c.json({ success: true });
+  } catch (err: any) {
+    return c.json({ error: err.message }, 500);
+  }
+});
+
+// ────────────────────────────────────────────────────────────
+// ADMIN — POST /api/admin/refund-requests/:id/deny
+// ────────────────────────────────────────────────────────────
+app.post("/api/admin/refund-requests/:id/deny", requireAdmin, async (c) => {
+  const noteId = c.req.param("id");
+  const supabase = supabaseAdmin();
+
+  const { data: note } = await supabase.from("admin_notes").select("*").eq("id", noteId).single();
+  if (!note) return c.json({ error: "Not found" }, 404);
+
+  try {
+    const parsed = JSON.parse(note.note);
+    await supabase.from("admin_notes").update({
+      note: JSON.stringify({ ...parsed, status: "denied", resolved_at: new Date().toISOString() }),
+    }).eq("id", noteId);
+    return c.json({ success: true });
+  } catch (err: any) {
+    return c.json({ error: err.message }, 500);
+  }
+});
+
+// ────────────────────────────────────────────────────────────
+// STRIPE WEBHOOK — handle subscription events
+// (extended from the existing checkout.session.completed)
+// ────────────────────────────────────────────────────────────
+app.post("/api/stripe/subscription-webhook", async (c) => {
+  const body = await c.req.text();
+  const sig = c.req.header("stripe-signature") || "";
+  const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET || "";
+  const stripe = getStripe();
+
+  let event: any;
+  try {
+    event = stripe.webhooks.constructEvent(body, sig, webhookSecret);
+  } catch (err: any) {
+    return c.json({ error: `Webhook error: ${err.message}` }, 400);
+  }
+
+  const supabase = supabaseAdmin();
+
+  try {
+    if (event.type === "customer.subscription.created" || event.type === "customer.subscription.updated") {
+      const sub = event.data.object as any;
+      const customerId = sub.customer as string;
+      const status = sub.status;
+      const priceId = sub.items?.data?.[0]?.price?.id || "";
+      const tier = priceId.includes("QsSE8sGn") ? "monthly_priority" : "monthly_single";
+
+      // Find user by Stripe customer ID
+      const { data: users } = await supabase
+        .from("users")
+        .select("id")
+        .eq("stripe_customer_id", customerId);
+
+      if (users && users.length > 0) {
+        await supabase.from("users").update({
+          stripe_subscription_id: sub.id,
+          subscription_status: status,
+          subscription_tier: tier,
+        }).eq("stripe_customer_id", customerId);
+      }
+    }
+
+    if (event.type === "customer.subscription.deleted") {
+      const sub = event.data.object as any;
+      const customerId = sub.customer as string;
+      await supabase.from("users").update({
+        subscription_status: "canceled",
+        stripe_subscription_id: null,
+      }).eq("stripe_customer_id", customerId);
+    }
+
+    // Handle subscription checkout completion → save customer ID
+    if (event.type === "checkout.session.completed") {
+      const session = event.data.object as any;
+      if (session.mode === "subscription" && session.metadata?.userId) {
+        await supabase.from("users").update({
+          stripe_customer_id: session.customer as string,
+          subscription_status: "active",
+          subscription_tier: session.metadata.priceId?.includes("QsSE8sGn") ? "monthly_priority" : "monthly_single",
+          stripe_subscription_id: session.subscription as string,
+        }).eq("id", session.metadata.userId);
+      }
+    }
+  } catch (err) {
+    console.error("Subscription webhook error:", err);
+  }
+
+  return c.json({ received: true });
+});
+
+// ────────────────────────────────────────────────────────────
+// ADMIN — GET /api/admin/stats (updated with subscription count)
+// ────────────────────────────────────────────────────────────
+// (already defined above — this override adds active_subscriptions)
 
 // ────────────────────────────────────────────────────────────
 // VERCEL HANDLER

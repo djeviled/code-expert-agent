@@ -6,18 +6,18 @@ import { Loader, Eye, EyeOff } from "lucide-react";
 export default function LoginPage() {
   const navigate = useNavigate();
   const { login } = useAuth();
-  const [isLoading, setIsLoading] = useState(false);
+  const [isLoading, setIsLoading]     = useState(false);
   const [showPassword, setShowPassword] = useState(false);
-  const [error, setError] = useState("");
-  const [form, setForm] = useState({ email: "", password: "" });
+  const [error, setError]             = useState("");
+  const [form, setForm]               = useState({ email: "", password: "" });
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
     setIsLoading(true);
     try {
-      await login(form.email, form.password);
-      navigate("/chat");
+      const { redirectTo } = await login(form.email, form.password);
+      navigate(redirectTo);
     } catch (err: any) {
       setError(err.message || "Invalid email or password");
     } finally {
@@ -35,7 +35,7 @@ export default function LoginPage() {
 
         <div className="bg-white/5 border border-white/10 rounded-2xl p-8">
           <h1 className="text-2xl font-bold mb-2 text-center">Welcome back</h1>
-          <p className="text-gray-400 text-center mb-8">Sign in to continue rescuing code</p>
+          <p className="text-gray-400 text-center mb-8">Sign in to your dashboard</p>
 
           {error && (
             <div className="mb-6 p-4 bg-red-500/20 border border-red-500/50 rounded-xl">
@@ -89,7 +89,7 @@ export default function LoginPage() {
           <p className="text-center text-gray-400 text-sm mt-8">
             Don't have an account?{" "}
             <Link to="/signup" className="text-blue-400 hover:text-blue-300">
-              Sign up
+              Get started
             </Link>
           </p>
         </div>

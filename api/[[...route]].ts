@@ -1,10 +1,10 @@
 /**
- * Vercel serverless function — plain Node.js handler, no adapters.
- * Manually bridges IncomingMessage ↔ Web Request/Response.
- * Fully supports SSE streaming for the agent chat.
+ * Vercel serverless function — catch-all for /api/* routes.
+ * All API logic is in ./lib.ts (same directory = included in Vercel bundle).
+ * Supports SSE streaming, Stripe, Anthropic, Supabase.
  */
 import type { IncomingMessage, ServerResponse } from "node:http";
-import app from "../src/api/index";
+import app from "./lib";
 
 export const config = {
   maxDuration: 300,
@@ -15,11 +15,11 @@ export default async function handler(
   res: ServerResponse
 ): Promise<void> {
   try {
-    // Build URL from incoming request
+    // Build URL
     const host = req.headers.host || "localhost";
     const url = new URL(req.url || "/", `http://${host}`);
 
-    // Read body for non-GET requests
+    // Read body
     let body: Buffer | null = null;
     if (req.method !== "GET" && req.method !== "HEAD") {
       body = await new Promise<Buffer>((resolve, reject) => {
@@ -46,8 +46,7 @@ export default async function handler(
       method: req.method || "GET",
       headers,
       body: body && body.length > 0 ? body : undefined,
-      // Required for body in some Node.js versions
-      ...(body && body.length > 0 ? { duplex: "half" } as any : {}),
+      ...(body && body.length > 0 ? ({ duplex: "half" } as any) : {}),
     });
 
     // Call Hono app
@@ -56,42 +55,37 @@ export default async function handler(
     // Write status + headers
     res.statusCode = webRes.status;
     webRes.headers.forEach((value, key) => {
-      // Skip headers that Node.js sets automatically
       if (key.toLowerCase() !== "transfer-encoding") {
         res.setHeader(key, value);
       }
     });
 
-    // Handle streaming body (SSE) vs buffered body
+    // Stream or buffer the response
     if (webRes.body) {
       const reader = webRes.body.getReader();
-
-      // For SSE, flush immediately on each chunk
-      const isSSE =
-        (webRes.headers.get("content-type") || "").includes("text/event-stream");
+      const isSSE = (webRes.headers.get("content-type") || "").includes(
+        "text/event-stream"
+      );
 
       if (isSSE) {
         res.flushHeaders?.();
-        (res as any).flush?.();
       }
 
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
         res.write(value);
-        // Force flush for SSE
         if (isSSE) (res as any).flush?.();
       }
-      res.end();
-    } else {
-      res.end();
     }
+
+    res.end();
   } catch (err: any) {
-    console.error("[Vercel handler error]", err);
+    console.error("[handler error]", err.message);
     if (!res.headersSent) {
       res.statusCode = 500;
       res.setHeader("Content-Type", "application/json");
-      res.end(JSON.stringify({ error: "Internal server error", message: err.message }));
+      res.end(JSON.stringify({ error: "Internal server error", detail: err.message }));
     }
   }
 }

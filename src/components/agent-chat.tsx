@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
-import { Send, User, Bot, Loader, AlertCircle } from "lucide-react";
+import { Send, User, Bot, Loader, AlertCircle, Github, Globe, Database, Wrench } from "lucide-react";
 import { marked } from "marked";
 
 interface Message {
@@ -12,6 +12,11 @@ interface Message {
 
 interface AgentChatProps {
   userEmail: string;
+}
+
+interface ToolEvent {
+  server: string;
+  tool: string;
 }
 
 // Configure marked for safe HTML rendering
@@ -25,17 +30,30 @@ function renderMarkdown(text: string): string {
   }
 }
 
+const SERVER_ICONS: Record<string, React.ReactNode> = {
+  github:   <Github className="w-3 h-3" />,
+  vercel:   <Globe className="w-3 h-3" />,
+  supabase: <Database className="w-3 h-3" />,
+};
+
+const SERVER_COLORS: Record<string, string> = {
+  github:   "text-white bg-gray-700/60",
+  vercel:   "text-white bg-black/60",
+  supabase: "text-emerald-300 bg-emerald-900/40",
+};
+
 export default function AgentChat({ userEmail }: AgentChatProps) {
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [initError, setInitError] = useState<string | null>(null);
+  const [activeTool, setActiveTool] = useState<ToolEvent | null>(null);
+  const [agentStatus, setAgentStatus] = useState<"idle" | "thinking" | "streaming">("idle");
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const abortRef = useRef<AbortController | null>(null);
 
-  // Auto-scroll to bottom
   const scrollToBottom = useCallback(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, []);
@@ -85,11 +103,10 @@ export default function AgentChat({ userEmail }: AgentChatProps) {
     const text = input.trim();
     setInput("");
     setLoading(true);
+    setActiveTool(null);
+    setAgentStatus("thinking");
 
-    // Add user message
     setMessages((m) => [...m, { role: "user", text }]);
-
-    // Add streaming placeholder for agent
     setMessages((m) => [...m, { role: "agent", text: "", streaming: true }]);
 
     abortRef.current?.abort();
@@ -104,10 +121,7 @@ export default function AgentChat({ userEmail }: AgentChatProps) {
         signal: controller.signal,
       });
 
-      if (!res.ok) {
-        throw new Error(`HTTP ${res.status}`);
-      }
-
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
       if (!res.body) throw new Error("No response stream");
 
       const reader = res.body.getReader();
@@ -128,7 +142,18 @@ export default function AgentChat({ userEmail }: AgentChatProps) {
           try {
             const event = JSON.parse(line.slice(6));
 
-            if (event.type === "chunk") {
+            if (event.type === "thinking") {
+              setAgentStatus("thinking");
+              setActiveTool(null);
+
+            } else if (event.type === "tool") {
+              // Agent is using an MCP tool — show status
+              setAgentStatus("thinking");
+              setActiveTool({ server: event.server || "tool", tool: event.tool || event.name || "" });
+
+            } else if (event.type === "chunk") {
+              setAgentStatus("streaming");
+              setActiveTool(null);
               agentText += event.text;
               setMessages((m) => {
                 const next = [...m];
@@ -138,6 +163,7 @@ export default function AgentChat({ userEmail }: AgentChatProps) {
                 }
                 return next;
               });
+
             } else if (event.type === "done") {
               setMessages((m) => {
                 const next = [...m];
@@ -148,6 +174,9 @@ export default function AgentChat({ userEmail }: AgentChatProps) {
                 return next;
               });
               setLoading(false);
+              setActiveTool(null);
+              setAgentStatus("idle");
+
             } else if (event.type === "error") {
               setMessages((m) => {
                 const next = [...m];
@@ -162,6 +191,8 @@ export default function AgentChat({ userEmail }: AgentChatProps) {
                 return next;
               });
               setLoading(false);
+              setActiveTool(null);
+              setAgentStatus("idle");
             }
           } catch {
             // Skip malformed JSON
@@ -184,6 +215,8 @@ export default function AgentChat({ userEmail }: AgentChatProps) {
         return next;
       });
       setLoading(false);
+      setActiveTool(null);
+      setAgentStatus("idle");
     }
 
     inputRef.current?.focus();
@@ -198,29 +231,65 @@ export default function AgentChat({ userEmail }: AgentChatProps) {
 
   const isReady = !!sessionId && !loading;
 
+  // Status label for the header
+  const statusLabel = initError
+    ? "Connection error"
+    : !sessionId
+    ? "Initializing..."
+    : activeTool
+    ? `${activeTool.server}: ${activeTool.tool.replace(/_/g, " ")}`
+    : agentStatus === "thinking"
+    ? "Analyzing..."
+    : agentStatus === "streaming"
+    ? "Responding..."
+    : "Ready to rescue your code";
+
   return (
     <div className="flex flex-col h-full bg-[#0a0a1a] border border-[#1e3a5f] rounded-xl overflow-hidden">
       {/* Header */}
       <div className="bg-gradient-to-r from-[#0a1628] to-[#1a2744] px-6 py-4 border-b border-[#1e3a5f] flex-shrink-0">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-full bg-gradient-to-br from-[#00d4ff] to-[#0066ff] flex items-center justify-center">
-            <Bot className="w-6 h-6 text-white" />
+          <div className="w-10 h-10 rounded-full bg-gradient-to-br from-[#00d4ff] to-[#0066ff] flex items-center justify-center flex-shrink-0">
+            {loading && agentStatus === "thinking" ? (
+              <Loader className="w-5 h-5 text-white animate-spin" />
+            ) : (
+              <Bot className="w-6 h-6 text-white" />
+            )}
           </div>
-          <div>
+          <div className="flex-1 min-w-0">
             <h2 className="text-white font-semibold">Code Expert Agent</h2>
-            <p className="text-xs text-[#00d4ff]">
-              {initError
-                ? "Connection error"
-                : sessionId
-                ? loading
-                  ? "Analyzing..."
-                  : "Ready to rescue your code"
-                : "Initializing..."}
+            <p className={`text-xs truncate transition-colors ${
+              activeTool
+                ? "text-yellow-400"
+                : agentStatus === "thinking"
+                ? "text-blue-300 animate-pulse"
+                : agentStatus === "streaming"
+                ? "text-[#00d4ff]"
+                : "text-[#00d4ff]/70"
+            }`}>
+              {activeTool && (
+                <span className="inline-flex items-center gap-1">
+                  <Wrench className="w-3 h-3" />
+                  {statusLabel}
+                </span>
+              )}
+              {!activeTool && statusLabel}
             </p>
           </div>
-          {loading && (
-            <div className="ml-auto">
-              <Loader className="w-4 h-4 text-[#00d4ff] animate-spin" />
+
+          {/* MCP tool badge */}
+          {activeTool && (
+            <div className={`flex-shrink-0 flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${SERVER_COLORS[activeTool.server] || "text-white bg-white/10"}`}>
+              {SERVER_ICONS[activeTool.server] || <Wrench className="w-3 h-3" />}
+              {activeTool.server}
+            </div>
+          )}
+
+          {/* MCP capabilities badge (idle) */}
+          {!activeTool && !loading && sessionId && (
+            <div className="hidden sm:flex items-center gap-1">
+              <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse" />
+              <span className="text-xs text-gray-500">MCP</span>
             </div>
           )}
         </div>
@@ -304,7 +373,9 @@ export default function AgentChat({ userEmail }: AgentChatProps) {
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
             placeholder={
-              isReady ? "Paste your code or describe the issue..." : "Waiting for connection..."
+              isReady
+                ? "Paste your code, share a GitHub link, or describe what's broken..."
+                : "Waiting for connection..."
             }
             disabled={!isReady}
           />
@@ -316,9 +387,17 @@ export default function AgentChat({ userEmail }: AgentChatProps) {
             <Send className="w-5 h-5" />
           </button>
         </div>
-        <p className="text-gray-600 text-xs mt-2 text-center">
-          Press Enter to send · Shift+Enter for new line
-        </p>
+        <div className="flex items-center justify-between mt-2">
+          <p className="text-gray-600 text-xs">
+            Press Enter to send · Shift+Enter for new line
+          </p>
+          <div className="flex items-center gap-2 text-xs text-gray-600">
+            <Github className="w-3 h-3" />
+            <Globe className="w-3 h-3" />
+            <Database className="w-3 h-3" />
+            <span>MCP tools active</span>
+          </div>
+        </div>
       </div>
     </div>
   );

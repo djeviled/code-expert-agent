@@ -132,8 +132,7 @@ app.post("/api/auth/update-password", async (c) => {
 
 // ────────────────────────────────────────────────────────────
 // AGENT — POST /api/agent/session
-// Creates a session and returns greeting
-// NOTE: DB uses project_name + started_at (not title/created_at)
+// Creates an Anthropic managed session + stores in DB
 // ────────────────────────────────────────────────────────────
 app.post("/api/agent/session", async (c) => {
   try {
@@ -141,37 +140,62 @@ app.post("/api/agent/session", async (c) => {
     if (!userEmail) return c.json({ error: "userEmail required" }, 400);
 
     const supabase = supabaseAdmin();
+    const anthropic = getAnthropic();
 
+    const AGENT_ID       = process.env.AGENT_ID       || "";
+    const ENVIRONMENT_ID = process.env.ENVIRONMENT_ID || "";
+    const VAULT_ID       = process.env.VAULT_ID       || "";
+
+    // Look up user profile
     const { data: user } = await supabase
       .from("users")
-      .select("*")
+      .select("id, name, email")
       .eq("email", userEmail)
       .single();
 
-    // Use project_name (actual column) and started_at (actual timestamp column)
-    const { data: session, error } = await supabase
+    const userName = user?.name || userEmail.split("@")[0];
+
+    // Create Anthropic managed session with MCP tools
+    let anthropicSessionId: string | null = null;
+    if (AGENT_ID && ENVIRONMENT_ID && VAULT_ID) {
+      try {
+        const agentSession = await (anthropic as any).beta.sessions.create({
+          agent: AGENT_ID,
+          environment_id: ENVIRONMENT_ID,
+          vault_ids: [VAULT_ID],
+          title: `Session — ${userEmail}`,
+        });
+        anthropicSessionId = agentSession.id;
+      } catch (agentErr: any) {
+        console.error("Managed session create error (non-fatal):", agentErr.message);
+        // Fall through to basic mode
+      }
+    }
+
+    // Store session in Supabase (session_id = Anthropic session ID)
+    const { data: session, error: sessionErr } = await supabase
       .from("agent_sessions")
       .insert({
         user_id: user?.id || null,
+        session_id: anthropicSessionId || null,
         project_name: `Session for ${userEmail}`,
         started_at: new Date().toISOString(),
       })
       .select()
       .single();
 
-    if (error || !session) {
-      console.error("Session create error:", error);
+    if (sessionErr || !session) {
+      console.error("DB session create error:", sessionErr);
       return c.json({ error: "Failed to create session" }, 500);
     }
 
-    const userName = user?.name || userEmail.split("@")[0];
     const greeting =
-      `Hi ${userName}! 👋 I'm your **Code Expert Agent** — I specialize in rescuing broken AI-generated code.\n\n` +
+      `Hi ${userName}! 👋 I'm your **Code Expert Agent** — I have full access to GitHub, Vercel, and Supabase via MCP tools.\n\n` +
       `**To get started, tell me:**\n` +
       `1. What's broken or not working?\n` +
-      `2. Paste your code, error messages, or share a GitHub link\n` +
+      `2. Paste your code, error messages, or share a GitHub repo link\n` +
       `3. What platform are you deploying to? (Vercel, Netlify, Railway, etc.)\n\n` +
-      `I'll analyze everything systematically and fix it. No code left behind. 🚀`;
+      `I can read and write to your repos, deploy to Vercel, and manage your database directly. No code left behind. 🚀`;
 
     await supabase.from("agent_messages").insert({
       session_id: session.id,
@@ -188,7 +212,8 @@ app.post("/api/agent/session", async (c) => {
 
 // ────────────────────────────────────────────────────────────
 // AGENT — POST /api/agent/message
-// Returns SSE stream with Claude's response
+// Routes to managed session (with MCP tools) or fallback
+// Returns SSE: {type:"thinking"} | {type:"tool",server,tool} | {type:"chunk",text} | {type:"done"} | {type:"error",message}
 // ────────────────────────────────────────────────────────────
 app.post("/api/agent/message", async (c) => {
   const { sessionId, message } = await c.req.json();
@@ -197,24 +222,21 @@ app.post("/api/agent/message", async (c) => {
   const supabase = supabaseAdmin();
   const anthropic = getAnthropic();
 
+  // Load DB session to get Anthropic session ID
+  const { data: dbSession } = await supabase
+    .from("agent_sessions")
+    .select("id, session_id, user_id")
+    .eq("id", sessionId)
+    .single();
+
+  const anthropicSessionId = dbSession?.session_id || null;
+
+  // Save user message to DB
   await supabase.from("agent_messages").insert({
     session_id: sessionId,
     role: "user",
     content: message,
   });
-
-  const { data: history } = await supabase
-    .from("agent_messages")
-    .select("role, content")
-    .eq("session_id", sessionId)
-    .order("created_at", { ascending: true });
-
-  const claudeMessages: { role: "user" | "assistant"; content: string }[] = (history || []).map(
-    (m: any) => ({
-      role: m.role === "agent" ? ("assistant" as const) : ("user" as const),
-      content: m.content,
-    })
-  );
 
   const encoder = new TextEncoder();
   let fullResponse = "";
@@ -225,43 +247,130 @@ app.post("/api/agent/message", async (c) => {
         controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
       };
 
+      // ── PATH A: Managed Agents (MCP tools via Anthropic sessions) ──
+      if (anthropicSessionId) {
+        try {
+          send({ type: "thinking" });
+
+          // Send user message to managed session
+          await (anthropic as any).beta.sessions.events.send(anthropicSessionId, {
+            events: [{
+              type: "user.message",
+              content: [{ type: "text", text: message }],
+            }],
+          });
+
+          // Stream events back, translating to our SSE format
+          const eventStream = await (anthropic as any).beta.sessions.events.stream(
+            anthropicSessionId
+          );
+
+          for await (const event of eventStream) {
+            const e = event as any;
+
+            if (e.type === "session.status_running") {
+              send({ type: "thinking" });
+
+            } else if (e.type === "agent.thinking") {
+              send({ type: "thinking" });
+
+            } else if (e.type === "agent.mcp_tool_use") {
+              // Show tool usage to user
+              send({ type: "tool", server: e.mcp_server_name || "tool", tool: e.name || "" });
+
+            } else if (e.type === "agent.tool_use") {
+              send({ type: "tool", server: "agent", tool: e.name || "" });
+
+            } else if (e.type === "agent.message") {
+              // Stream the agent's text response
+              for (const block of (e.content || [])) {
+                if (block.type === "text" && block.text) {
+                  fullResponse += block.text;
+                  // Stream in small word-sized chunks for typewriter effect
+                  const tokens = (block.text as string).match(/\S+\s*/g) || [block.text];
+                  for (const token of tokens) {
+                    send({ type: "chunk", text: token });
+                  }
+                }
+              }
+
+            } else if (e.type === "session.requires_action") {
+              // Auto-approve tool confirmations (file writes, pushes)
+              try {
+                await (anthropic as any).beta.sessions.events.send(anthropicSessionId, {
+                  events: [{
+                    type: "user.tool_confirmation",
+                    tool_use_id: e.tool_use_id,
+                    confirmed: true,
+                  }],
+                });
+              } catch (confirmErr: any) {
+                console.error("Tool confirmation error:", confirmErr.message);
+              }
+
+            } else if (
+              e.type === "session.status_idle" ||
+              e.type === "session.end_turn"
+            ) {
+              break; // Done for this turn
+
+            } else if (e.type === "session.error") {
+              const errMsg = e.error?.message || "Agent error occurred";
+              console.error("Session error event:", errMsg);
+              send({ type: "error", message: errMsg });
+              controller.close();
+              return;
+            }
+            // Silently skip: agent.tool_result, agent.mcp_tool_result,
+            //                span.*, session.status_rescheduled, session.deleted
+          }
+
+          // Save full response to DB
+          if (fullResponse) {
+            await supabase.from("agent_messages").insert({
+              session_id: sessionId,
+              role: "agent",
+              content: fullResponse,
+            });
+          }
+
+          send({ type: "done" });
+          controller.close();
+          return;
+
+        } catch (err: any) {
+          console.error("Managed session stream error, falling back:", err.message);
+          // Fall through to direct Claude fallback
+        }
+      }
+
+      // ── PATH B: Direct Claude fallback (no MCP tools) ──
       try {
         if (!ANTHROPIC_KEY) {
-          send({ type: "chunk", text: "⚠️ Agent is not configured yet. ANTHROPIC_API_KEY is missing. Please contact support." });
+          send({ type: "chunk", text: "⚠️ Agent is not configured. ANTHROPIC_API_KEY missing." });
           send({ type: "done" });
           controller.close();
           return;
         }
 
+        const { data: history } = await supabase
+          .from("agent_messages")
+          .select("role, content")
+          .eq("session_id", sessionId)
+          .order("created_at", { ascending: true });
+
+        const claudeMessages: { role: "user" | "assistant"; content: string }[] =
+          (history || []).map((m: any) => ({
+            role: m.role === "agent" ? ("assistant" as const) : ("user" as const),
+            content: m.content,
+          }));
+
         const claudeStream = anthropic.messages.stream({
           model: "claude-opus-4-5",
           max_tokens: 8096,
           system: `You are Code Expert Agent — an elite AI engineer specialized in rescuing broken AI-generated code.
-
-Your expertise:
-- TypeScript, JavaScript, React, Next.js, Vue, Python, Go
-- Fixing build errors, dependency conflicts, and deployment failures  
-- Debugging Supabase, PostgreSQL, MongoDB, Firebase integrations
-- Stripe, OpenAI, Anthropic API integrations
-- Deploying to Vercel, Netlify, Railway, Render, Fly.io
-- Reading error logs and stack traces
-- Fixing CSS/styling issues in Tailwind, Styled Components, CSS Modules
-
-Your approach:
-1. Ask clarifying questions if you need more context
-2. Analyze code and errors systematically  
-3. Identify the ROOT CAUSE — not just symptoms
-4. Provide COMPLETE fixed code, not partial snippets
-5. Explain what was wrong and why your fix works
-6. Always check if there are related issues that could cause problems
-
-Formatting:
-- Use code blocks with language labels for all code
-- Use **bold** for important points
-- Keep explanations concise but thorough
-- If asked for a full file, provide the COMPLETE file
-
-You never give up. You dig deeper. You ship working code.`,
+Fix build errors, deployment failures, TypeScript, React, Supabase, Stripe, and Vercel issues.
+Always provide complete fixed code. Identify root causes, not just symptoms.`,
           messages: claudeMessages,
         });
 

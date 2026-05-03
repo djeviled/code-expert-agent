@@ -1,4 +1,5 @@
 import { BrowserRouter, Route, Routes, Navigate } from "react-router-dom";
+import { Analytics } from "@vercel/analytics/react";
 import { AuthProvider, useAuth } from "./lib/auth-context";
 import LandingPage from "./pages/landing";
 import ChatPage from "./pages/chat";
@@ -60,6 +61,7 @@ export default function App() {
             {/* Fallback */}
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
+          <Analytics />
         </BrowserRouter>
       </AuthProvider>
     </ThemeProvider>

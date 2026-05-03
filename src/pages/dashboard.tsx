@@ -3,8 +3,10 @@ import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "../lib/auth-context";
 import {
   MessageSquare, Plus, Clock, CheckCircle, AlertCircle, CreditCard,
-  Activity, LogOut, ChevronRight, RefreshCw, ExternalLink, Zap,
-  Shield, Star, X, Loader, FileText,
+  Activity, LogOut, RefreshCw, ExternalLink, Zap,
+  Shield, Star, X, Loader, FileText, Key, Eye, EyeOff,
+  Github, Globe, Database, Bot, ChevronDown, ChevronUp,
+  Copy, ArrowRight, Sparkles, Trash2,
 } from "lucide-react";
 
 interface Project {
@@ -33,37 +35,156 @@ interface UserDashboardData {
   projects: Project[];
 }
 
-const STATUS_CONFIG: Record<string, { label: string; color: string; icon: any; desc: string }> = {
-  pending: {
-    label: "Awaiting Start",
-    color: "text-yellow-400 bg-yellow-500/15 border-yellow-500/30",
-    icon: Clock,
-    desc: "Your project is queued. We'll start work shortly.",
-  },
-  in_progress: {
-    label: "In Progress",
-    color: "text-blue-400 bg-blue-500/15 border-blue-500/30",
-    icon: Activity,
-    desc: "Our agent is actively working on your project.",
-  },
-  awaiting_payment: {
-    label: "Awaiting Balance Payment",
-    color: "text-purple-400 bg-purple-500/15 border-purple-500/30",
-    icon: CreditCard,
-    desc: "Your project has been delivered! Pay the balance to access everything.",
-  },
-  delivered: {
-    label: "Delivered ✓",
-    color: "text-green-400 bg-green-500/15 border-green-500/30",
-    icon: CheckCircle,
-    desc: "Your project is live and fully delivered.",
-  },
-  failed: {
-    label: "Needs Attention",
-    color: "text-red-400 bg-red-500/15 border-red-500/30",
+interface SavedCredential {
+  provider: string;
+  saved: boolean;
+  updated_at: string;
+}
+
+// ── Sample prompts the user can click to pre-fill chat ──
+const SAMPLE_PROMPTS = [
+  {
+    category: "Fix Errors",
+    color: "text-red-400",
+    bg: "bg-red-500/10 border-red-500/20",
     icon: AlertCircle,
-    desc: "There was an issue. Contact support for a refund or retry.",
+    prompts: [
+      {
+        title: "TypeScript build error",
+        text: "My TypeScript project won't build. Here are the errors:\n\n[PASTE YOUR ERRORS HERE]\n\nHere is the file causing issues:\n\n[PASTE YOUR CODE HERE]\n\nPlease identify the root cause and give me the complete fixed file.",
+      },
+      {
+        title: "npm install / dependency conflict",
+        text: "I'm getting dependency errors when running npm install:\n\n[PASTE ERROR HERE]\n\nMy package.json is:\n\n[PASTE package.json HERE]\n\nPlease fix the dependency conflicts and give me an updated package.json.",
+      },
+      {
+        title: "Runtime / console error",
+        text: "My app crashes at runtime with this error:\n\n[PASTE ERROR + STACK TRACE HERE]\n\nThis happens when I [DESCRIBE WHAT YOU DO]. Here's the relevant code:\n\n[PASTE CODE HERE]\n\nPlease find the bug and fix it completely.",
+      },
+    ],
   },
+  {
+    category: "Deploy to Vercel",
+    color: "text-blue-400",
+    bg: "bg-blue-500/10 border-blue-500/20",
+    icon: Globe,
+    prompts: [
+      {
+        title: "Deploy my project to Vercel",
+        text: "Please deploy my project to Vercel. My GitHub repo is:\n\n[PASTE REPO URL HERE]\n\nEnvironment variables I need set:\n\n[LIST YOUR ENV VARS]\n\nPlease set everything up and give me the live URL.",
+      },
+      {
+        title: "Fix a failing Vercel build",
+        text: "My Vercel deployment is failing. Here is the build log:\n\n[PASTE VERCEL BUILD LOG HERE]\n\nMy project uses [FRAMEWORK e.g. Next.js / Vite / React]. Please diagnose and fix the build so it deploys successfully.",
+      },
+      {
+        title: "Set up environment variables",
+        text: "I need to add environment variables to my Vercel project. My project name/URL is:\n\n[PROJECT NAME OR VERCEL URL]\n\nPlease add these environment variables for production:\n\n[LIST KEY=VALUE PAIRS]",
+      },
+    ],
+  },
+  {
+    category: "GitHub & Code",
+    color: "text-purple-400",
+    bg: "bg-purple-500/10 border-purple-500/20",
+    icon: Github,
+    prompts: [
+      {
+        title: "Review & fix my repo",
+        text: "Please look at my GitHub repository and fix all the issues:\n\nRepo: [PASTE REPO URL]\n\nMain problems:\n1. [DESCRIBE PROBLEM 1]\n2. [DESCRIBE PROBLEM 2]\n\nPlease read the code, identify all issues, and push the fixes.",
+      },
+      {
+        title: "Add a feature to my project",
+        text: "I need you to add a new feature to my existing project:\n\nRepo: [PASTE REPO URL]\n\nFeature needed:\n[DESCRIBE THE FEATURE IN DETAIL]\n\nPlease implement it completely and push the changes.",
+      },
+      {
+        title: "Code review & refactor",
+        text: "Please review this code and refactor it for production quality:\n\n[PASTE CODE HERE]\n\nFocus on: error handling, TypeScript types, performance, and security. Give me the complete refactored version.",
+      },
+    ],
+  },
+  {
+    category: "Supabase & Database",
+    color: "text-emerald-400",
+    bg: "bg-emerald-500/10 border-emerald-500/20",
+    icon: Database,
+    prompts: [
+      {
+        title: "Fix Supabase auth issue",
+        text: "My Supabase authentication isn't working correctly. The error is:\n\n[PASTE ERROR HERE]\n\nHere is my auth code:\n\n[PASTE CODE HERE]\n\nMy Supabase project URL is: [YOUR SUPABASE URL]\n\nPlease fix the auth implementation completely.",
+      },
+      {
+        title: "Fix RLS / permissions",
+        text: "I'm getting Row Level Security errors in Supabase. The error is:\n\n[PASTE ERROR]\n\nThe query that's failing:\n\n[PASTE QUERY]\n\nPlease write the correct RLS policies and explain what was wrong.",
+      },
+      {
+        title: "Design & create a table",
+        text: "I need a new Supabase table for my app. Here's what it needs to store:\n\n[DESCRIBE THE DATA]\n\nRelationships with existing tables:\n[DESCRIBE RELATIONSHIPS]\n\nPlease write the complete SQL schema with indexes, RLS policies, and any triggers needed.",
+      },
+    ],
+  },
+];
+
+// ── API credential definitions ──
+const CREDENTIAL_DEFS = [
+  {
+    provider: "github",
+    label: "GitHub Personal Access Token",
+    icon: Github,
+    color: "text-white",
+    placeholder: "ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+    hint: "Needs: repo, workflow scopes",
+    helpUrl: "https://github.com/settings/tokens/new",
+    helpLabel: "Create on GitHub →",
+  },
+  {
+    provider: "vercel",
+    label: "Vercel API Token",
+    icon: Globe,
+    color: "text-white",
+    placeholder: "xxxxxxxxxxxxxxxxxxxxxxxxxx",
+    hint: "From: Vercel → Settings → Tokens",
+    helpUrl: "https://vercel.com/account/tokens",
+    helpLabel: "Create on Vercel →",
+  },
+  {
+    provider: "supabase_url",
+    label: "Supabase Project URL",
+    icon: Database,
+    color: "text-emerald-400",
+    placeholder: "https://xxxxxxxxxxxxxxxxxxxx.supabase.co",
+    hint: "From: Supabase → Settings → API",
+    helpUrl: "https://supabase.com/dashboard",
+    helpLabel: "Find in Supabase →",
+  },
+  {
+    provider: "supabase_key",
+    label: "Supabase Service Role Key",
+    icon: Database,
+    color: "text-emerald-400",
+    placeholder: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+    hint: "Service role key (not anon key)",
+    helpUrl: "https://supabase.com/dashboard",
+    helpLabel: "Find in Supabase →",
+  },
+  {
+    provider: "anthropic",
+    label: "Anthropic API Key",
+    icon: Bot,
+    color: "text-orange-400",
+    placeholder: "sk-ant-api03-...",
+    hint: "Optional — uses shared key if not set",
+    helpUrl: "https://console.anthropic.com/settings/keys",
+    helpLabel: "Create on Anthropic →",
+  },
+];
+
+const STATUS_CONFIG: Record<string, { label: string; color: string; icon: any; desc: string }> = {
+  pending:          { label: "Awaiting Start",           color: "text-yellow-400 bg-yellow-500/15 border-yellow-500/30",  icon: Clock,       desc: "Your project is queued. We'll start work shortly." },
+  in_progress:      { label: "In Progress",              color: "text-blue-400 bg-blue-500/15 border-blue-500/30",        icon: Activity,    desc: "Our agent is actively working on your project." },
+  awaiting_payment: { label: "Awaiting Balance Payment", color: "text-purple-400 bg-purple-500/15 border-purple-500/30", icon: CreditCard,  desc: "Your project has been delivered! Pay the balance to access everything." },
+  delivered:        { label: "Delivered ✓",              color: "text-green-400 bg-green-500/15 border-green-500/30",    icon: CheckCircle, desc: "Your project is live and fully delivered." },
+  failed:           { label: "Needs Attention",          color: "text-red-400 bg-red-500/15 border-red-500/30",          icon: AlertCircle, desc: "There was an issue. Contact support for a refund or retry." },
 };
 
 const TIER_LABELS: Record<string, string> = {
@@ -85,9 +206,22 @@ export default function DashboardPage() {
   const [refundSubmitting, setRefundSubmitting] = useState(false);
   const [toast, setToast] = useState<{ msg: string; type: "success" | "error" } | null>(null);
 
+  // Credentials state
+  const [savedCreds, setSavedCreds] = useState<Record<string, SavedCredential>>({});
+  const [credValues, setCredValues] = useState<Record<string, string>>({});
+  const [credVisible, setCredVisible] = useState<Record<string, boolean>>({});
+  const [credSaving, setCredSaving] = useState<Record<string, boolean>>({});
+  const [credDeleting, setCredDeleting] = useState<Record<string, boolean>>({});
+  const [showCreds, setShowCreds] = useState(false);
+
+  // Prompts state
+  const [showPrompts, setShowPrompts] = useState(true);
+  const [copiedPrompt, setCopiedPrompt] = useState<string | null>(null);
+
   const showToast = (msg: string, type: "success" | "error" = "success") => {
     setToast({ msg, type });
     setTimeout(() => setToast(null), 4000);
+
   };
 
   const fetchDashboard = useCallback(async () => {
@@ -115,6 +249,73 @@ export default function DashboardPage() {
       setSearchParams({}, { replace: true });
     }
   }, []);
+
+  // Load saved credentials (names only — no token values returned)
+  useEffect(() => {
+    if (!token) return;
+    fetch("/api/user/credentials", { headers: { Authorization: `Bearer ${token}` } })
+      .then((r) => r.json())
+      .then(({ credentials }) => {
+        if (Array.isArray(credentials)) {
+          const map: Record<string, SavedCredential> = {};
+          credentials.forEach((c: SavedCredential) => { map[c.provider] = c; });
+          setSavedCreds(map);
+        }
+      })
+      .catch(() => {});
+  }, [token]);
+
+  const handleSaveCredential = async (provider: string) => {
+    const value = credValues[provider]?.trim();
+    if (!value) return;
+    setCredSaving((s) => ({ ...s, [provider]: true }));
+    try {
+      const res = await fetch("/api/user/credentials", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ provider, access_token: value }),
+      });
+      const d = await res.json();
+      if (d.success) {
+        setSavedCreds((s) => ({ ...s, [provider]: { provider, saved: true, updated_at: new Date().toISOString() } }));
+        setCredValues((s) => ({ ...s, [provider]: "" }));
+        showToast(`✅ ${provider} token saved securely`);
+      } else {
+        showToast(d.error || "Failed to save", "error");
+      }
+    } catch {
+      showToast("Network error", "error");
+    } finally {
+      setCredSaving((s) => ({ ...s, [provider]: false }));
+    }
+  };
+
+  const handleDeleteCredential = async (provider: string) => {
+    setCredDeleting((s) => ({ ...s, [provider]: true }));
+    try {
+      await fetch(`/api/user/credentials/${provider}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      setSavedCreds((s) => { const n = { ...s }; delete n[provider]; return n; });
+      showToast(`${provider} token removed`);
+    } catch {
+      showToast("Failed to remove", "error");
+    } finally {
+      setCredDeleting((s) => ({ ...s, [provider]: false }));
+    }
+  };
+
+  const handlePromptClick = (promptText: string, action: "chat" | "copy") => {
+    if (action === "copy") {
+      navigator.clipboard?.writeText(promptText).catch(() => {});
+      setCopiedPrompt(promptText);
+      setTimeout(() => setCopiedPrompt(null), 2000);
+    } else {
+      sessionStorage.setItem("chat_prefill", promptText);
+      navigate("/chat");
+    }
+  };
 
   const handleSubscribe = async (priceId: string) => {
     setSubscribing(true);
@@ -491,6 +692,200 @@ export default function DashboardPage() {
                   <p className="text-xs text-gray-500 text-center mt-2">Requires an active project</p>
                 )}
               </div>
+            </div>
+          )}
+        </section>
+
+        {/* ── SAMPLE PROMPTS ── */}
+        <section>
+          <button
+            onClick={() => setShowPrompts((v) => !v)}
+            className="w-full flex items-center justify-between mb-4 group"
+          >
+            <h2 className="text-lg font-bold flex items-center gap-2">
+              <Sparkles className="w-5 h-5 text-yellow-400" />
+              Sample Prompts
+              <span className="text-xs font-normal text-gray-500 ml-1">— click to send straight to chat</span>
+            </h2>
+            {showPrompts
+              ? <ChevronUp className="w-4 h-4 text-gray-500 group-hover:text-white transition" />
+              : <ChevronDown className="w-4 h-4 text-gray-500 group-hover:text-white transition" />}
+          </button>
+
+          {showPrompts && (
+            <div className="space-y-5">
+              {SAMPLE_PROMPTS.map((cat) => {
+                const CatIcon = cat.icon;
+                return (
+                  <div key={cat.category}>
+                    <div className="flex items-center gap-2 mb-3">
+                      <CatIcon className={`w-4 h-4 ${cat.color}`} />
+                      <span className={`text-sm font-semibold ${cat.color}`}>{cat.category}</span>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                      {cat.prompts.map((prompt) => (
+                        <div
+                          key={prompt.title}
+                          className={`border rounded-xl p-4 ${cat.bg} hover:border-opacity-50 transition-all group`}
+                        >
+                          <p className="text-sm font-semibold text-white mb-2">{prompt.title}</p>
+                          <p className="text-xs text-gray-400 line-clamp-2 mb-4 leading-relaxed">
+                            {prompt.text.split("\n")[0]}
+                          </p>
+                          <div className="flex gap-2">
+                            <button
+                              onClick={() => handlePromptClick(prompt.text, "chat")}
+                              className="flex-1 flex items-center justify-center gap-1.5 bg-gradient-to-r from-blue-500 to-cyan-400 text-black text-xs font-bold px-3 py-2 rounded-lg hover:opacity-90 transition"
+                            >
+                              <MessageSquare className="w-3 h-3" />
+                              Use in Chat
+                            </button>
+                            <button
+                              onClick={() => handlePromptClick(prompt.text, "copy")}
+                              title="Copy prompt"
+                              className="p-2 bg-white/10 hover:bg-white/20 rounded-lg transition text-gray-400 hover:text-white"
+                            >
+                              {copiedPrompt === prompt.text
+                                ? <CheckCircle className="w-3.5 h-3.5 text-green-400" />
+                                : <Copy className="w-3.5 h-3.5" />}
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
+              <div className="bg-blue-500/10 border border-blue-500/20 rounded-xl p-4 flex items-start gap-3">
+                <ArrowRight className="w-4 h-4 text-blue-400 flex-shrink-0 mt-0.5" />
+                <p className="text-xs text-blue-300 leading-relaxed">
+                  <strong className="text-white">Pro tip:</strong> Replace the bracketed placeholders like{" "}
+                  <code className="bg-black/30 px-1 rounded">[PASTE CODE HERE]</code> with your actual content before sending.
+                  The more detail you provide, the better the fix.
+                </p>
+              </div>
+            </div>
+          )}
+        </section>
+
+        {/* ── API CREDENTIALS VAULT ── */}
+        <section>
+          <button
+            onClick={() => setShowCreds((v) => !v)}
+            className="w-full flex items-center justify-between mb-4 group"
+          >
+            <h2 className="text-lg font-bold flex items-center gap-2">
+              <Key className="w-5 h-5 text-cyan-400" />
+              API Credentials
+              <span className="text-xs font-normal text-gray-500 ml-1">
+                — {Object.keys(savedCreds).length} of {CREDENTIAL_DEFS.length} saved
+              </span>
+            </h2>
+            {showCreds
+              ? <ChevronUp className="w-4 h-4 text-gray-500 group-hover:text-white transition" />
+              : <ChevronDown className="w-4 h-4 text-gray-500 group-hover:text-white transition" />}
+          </button>
+
+          {showCreds && (
+            <div className="space-y-3">
+              {/* Info banner */}
+              <div className="bg-[#111827] border border-blue-500/20 rounded-xl p-4 flex items-start gap-3 mb-5">
+                <Shield className="w-4 h-4 text-blue-400 flex-shrink-0 mt-0.5" />
+                <div>
+                  <p className="text-sm font-semibold text-white mb-1">Securely stored, never exposed</p>
+                  <p className="text-xs text-gray-400 leading-relaxed">
+                    Your tokens are stored encrypted in our database and injected directly into the agent's
+                    secure vault at session start. They are never shown to you again after saving, and never
+                    included in any chat response.
+                  </p>
+                </div>
+              </div>
+
+              {CREDENTIAL_DEFS.map((def) => {
+                const Icon = def.icon;
+                const isSaved = !!savedCreds[def.provider];
+                const saving = credSaving[def.provider];
+                const deleting = credDeleting[def.provider];
+                const value = credValues[def.provider] || "";
+                const visible = credVisible[def.provider];
+
+                return (
+                  <div key={def.provider} className="bg-white/5 border border-white/10 rounded-xl p-5">
+                    <div className="flex items-center justify-between mb-3">
+                      <div className="flex items-center gap-2">
+                        <Icon className={`w-4 h-4 ${def.color}`} />
+                        <span className="text-sm font-semibold text-white">{def.label}</span>
+                        {isSaved && (
+                          <span className="flex items-center gap-1 text-xs text-green-400 bg-green-500/15 border border-green-500/20 px-2 py-0.5 rounded-full">
+                            <CheckCircle className="w-3 h-3" /> Saved
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <a
+                          href={def.helpUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-xs text-blue-400 hover:text-blue-300 transition"
+                        >
+                          {def.helpLabel}
+                        </a>
+                        {isSaved && (
+                          <button
+                            onClick={() => handleDeleteCredential(def.provider)}
+                            disabled={deleting}
+                            className="p-1 text-gray-500 hover:text-red-400 transition"
+                            title="Remove credential"
+                          >
+                            {deleting
+                              ? <Loader className="w-3.5 h-3.5 animate-spin" />
+                              : <Trash2 className="w-3.5 h-3.5" />}
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    <p className="text-xs text-gray-500 mb-3">{def.hint}</p>
+
+                    {isSaved ? (
+                      <div className="flex items-center gap-3 bg-green-500/5 border border-green-500/20 rounded-lg px-4 py-3">
+                        <CheckCircle className="w-4 h-4 text-green-400 flex-shrink-0" />
+                        <p className="text-xs text-green-400">
+                          Token saved on {new Date(savedCreds[def.provider].updated_at).toLocaleDateString()}.
+                          Click the trash icon to replace it.
+                        </p>
+                      </div>
+                    ) : (
+                      <div className="flex gap-2">
+                        <div className="relative flex-1">
+                          <input
+                            type={visible ? "text" : "password"}
+                            value={value}
+                            onChange={(e) => setCredValues((s) => ({ ...s, [def.provider]: e.target.value }))}
+                            placeholder={def.placeholder}
+                            className="w-full bg-white/5 border border-white/10 rounded-lg px-4 py-2.5 text-white placeholder-gray-600 focus:outline-none focus:border-blue-500/50 text-sm pr-10 font-mono"
+                            onKeyDown={(e) => { if (e.key === "Enter") handleSaveCredential(def.provider); }}
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setCredVisible((s) => ({ ...s, [def.provider]: !visible }))}
+                            className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-white"
+                          >
+                            {visible ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                          </button>
+                        </div>
+                        <button
+                          onClick={() => handleSaveCredential(def.provider)}
+                          disabled={!value.trim() || saving}
+                          className="bg-gradient-to-r from-blue-500 to-cyan-400 text-black font-bold px-5 py-2.5 rounded-lg hover:opacity-90 transition disabled:opacity-40 text-sm flex items-center gap-2"
+                        >
+                          {saving ? <Loader className="w-3.5 h-3.5 animate-spin" /> : "Save"}
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           )}
         </section>

@@ -62,6 +62,15 @@ export default function AgentChat({ userEmail }: AgentChatProps) {
     scrollToBottom();
   }, [messages, scrollToBottom]);
 
+  // Pre-fill input from sessionStorage (set by dashboard prompt cards)
+  useEffect(() => {
+    const prefill = sessionStorage.getItem("chat_prefill");
+    if (prefill) {
+      setInput(prefill);
+      sessionStorage.removeItem("chat_prefill");
+    }
+  }, []);
+
   // Start session on mount
   useEffect(() => {
     if (!userEmail) return;

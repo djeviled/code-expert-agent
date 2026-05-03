@@ -952,6 +952,95 @@ app.get("/api/user/dashboard", async (c) => {
 });
 
 // ────────────────────────────────────────────────────────────
+// USER — GET /api/user/credentials
+// Returns saved providers list (names only, tokens masked)
+// ────────────────────────────────────────────────────────────
+app.get("/api/user/credentials", async (c) => {
+  const authHeader = c.req.header("authorization") || "";
+  if (!authHeader.startsWith("Bearer ")) return c.json({ error: "Unauthorized" }, 401);
+  const token = authHeader.slice(7);
+  const supabase = supabaseAdmin();
+  const { data: { user }, error } = await supabase.auth.getUser(token);
+  if (error || !user) return c.json({ error: "Unauthorized" }, 401);
+
+  const { data } = await supabase
+    .from("user_credentials")
+    .select("provider, created_at, updated_at")
+    .eq("user_id", user.id)
+    .order("provider");
+
+  // Return which providers are saved (never return actual tokens)
+  const saved = (data || []).map((r: any) => ({
+    provider: r.provider,
+    saved: true,
+    updated_at: r.updated_at || r.created_at,
+  }));
+
+  return c.json({ credentials: saved });
+});
+
+// ────────────────────────────────────────────────────────────
+// USER — POST /api/user/credentials
+// Save or update a credential (upsert by provider)
+// ────────────────────────────────────────────────────────────
+app.post("/api/user/credentials", async (c) => {
+  const authHeader = c.req.header("authorization") || "";
+  if (!authHeader.startsWith("Bearer ")) return c.json({ error: "Unauthorized" }, 401);
+  const token = authHeader.slice(7);
+  const supabase = supabaseAdmin();
+  const { data: { user }, error } = await supabase.auth.getUser(token);
+  if (error || !user) return c.json({ error: "Unauthorized" }, 401);
+
+  const { provider, access_token, metadata } = await c.req.json();
+  if (!provider || !access_token?.trim()) {
+    return c.json({ error: "provider and access_token are required" }, 400);
+  }
+
+  const VALID_PROVIDERS = ["github", "vercel", "supabase_url", "supabase_key", "anthropic"];
+  if (!VALID_PROVIDERS.includes(provider)) {
+    return c.json({ error: "Invalid provider" }, 400);
+  }
+
+  const { error: upsertErr } = await supabase
+    .from("user_credentials")
+    .upsert(
+      {
+        user_id: user.id,
+        provider,
+        access_token: access_token.trim(),
+        metadata: metadata || null,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: "user_id,provider" }
+    );
+
+  if (upsertErr) return c.json({ error: upsertErr.message }, 500);
+  return c.json({ success: true, provider });
+});
+
+// ────────────────────────────────────────────────────────────
+// USER — DELETE /api/user/credentials/:provider
+// Remove a saved credential
+// ────────────────────────────────────────────────────────────
+app.delete("/api/user/credentials/:provider", async (c) => {
+  const authHeader = c.req.header("authorization") || "";
+  if (!authHeader.startsWith("Bearer ")) return c.json({ error: "Unauthorized" }, 401);
+  const token = authHeader.slice(7);
+  const supabase = supabaseAdmin();
+  const { data: { user }, error } = await supabase.auth.getUser(token);
+  if (error || !user) return c.json({ error: "Unauthorized" }, 401);
+
+  const provider = c.req.param("provider");
+  await supabase
+    .from("user_credentials")
+    .delete()
+    .eq("user_id", user.id)
+    .eq("provider", provider);
+
+  return c.json({ success: true });
+});
+
+// ────────────────────────────────────────────────────────────
 // USER — POST /api/user/refund-request
 // Submit a refund request
 // ────────────────────────────────────────────────────────────

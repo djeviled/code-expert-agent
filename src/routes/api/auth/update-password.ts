@@ -3,7 +3,9 @@ import { createClient } from "@supabase/supabase-js";
 
 /**
  * POST /api/auth/update-password
- * Updates password using a valid recovery token
+ * Updates password using a valid recovery token from Supabase email link.
+ * The client extracts the access_token from the URL hash (#access_token=...&type=recovery)
+ * and sends it here with the new password.
  */
 export default async (c: Context) => {
   const { token, password } = await c.req.json();
@@ -17,26 +19,34 @@ export default async (c: Context) => {
   }
 
   const supabaseUrl = process.env.SUPABASE_URL || "https://pbfkqyrplcdzbnetfwjm.supabase.co";
-  const supabaseKey = process.env.SUPABASE_SERVICE_KEY || "";
+  const supabaseServiceKey = process.env.SUPABASE_SERVICE_KEY || "";
 
-  if (!supabaseKey) {
+  if (!supabaseServiceKey) {
     return c.json({ error: "Server misconfiguration" }, 500);
   }
 
   try {
-    const supabase = createClient(supabaseUrl, supabaseKey, {
+    // Step 1: Verify the recovery token and get the user
+    const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey, {
       auth: { autoRefreshToken: false, persistSession: false },
     });
 
-    // Update password using the recovery token
-    const { error } = await supabase.auth.updateUser(
-      { password },
-      { new: true }
+    const { data: userData, error: userError } = await supabaseAdmin.auth.getUser(token);
+
+    if (userError || !userData?.user) {
+      console.error("Token verification error:", userError);
+      return c.json({ error: "Invalid or expired reset link. Please request a new one." }, 401);
+    }
+
+    // Step 2: Update password using admin API (bypasses session requirement)
+    const { error: updateError } = await supabaseAdmin.auth.admin.updateUserById(
+      userData.user.id,
+      { password }
     );
 
-    if (error) {
-      console.error("Password update error:", error);
-      return c.json({ error: "Invalid or expired token" }, 401);
+    if (updateError) {
+      console.error("Password update error:", updateError);
+      return c.json({ error: "Failed to update password. Please try again." }, 500);
     }
 
     return c.json({ message: "Password updated successfully" });

@@ -26,14 +26,34 @@ end $$;
 -- USERS
 -- ────────────────────────────────────────────────────────────
 create table if not exists public.users (
-  id          uuid primary key references auth.users(id) on delete cascade,
-  email       text unique not null,
-  name        text,
-  role        user_role not null default 'SITE',
-  credits     integer not null default 0,
-  created_at  timestamptz default now(),
-  updated_at  timestamptz default now()
+  id                      uuid primary key references auth.users(id) on delete cascade,
+  email                   text unique not null,
+  name                    text,
+  role                    user_role not null default 'SITE',
+  -- credits / sites rescued counter
+  credits                 integer not null default 0,
+  sites_rescued           integer not null default 0,
+  -- Stripe billing
+  stripe_customer_id      text unique,
+  stripe_subscription_id  text,
+  subscription_status     text default null,   -- null | 'active' | 'canceled' | 'past_due'
+  subscription_tier       text default null,   -- null | 'monthly_single' | 'monthly_priority'
+  -- account state
+  is_banned               boolean not null default false,
+  created_at              timestamptz default now(),
+  updated_at              timestamptz default now()
 );
+
+-- Add columns to existing table (safe / idempotent)
+do $$ begin
+  alter table public.users add column if not exists sites_rescued integer not null default 0;
+  alter table public.users add column if not exists stripe_customer_id text;
+  alter table public.users add column if not exists stripe_subscription_id text;
+  alter table public.users add column if not exists subscription_status text default null;
+  alter table public.users add column if not exists subscription_tier text default null;
+  alter table public.users add column if not exists is_banned boolean not null default false;
+exception when others then null;
+end $$;
 
 -- ────────────────────────────────────────────────────────────
 -- PROJECTS  (code rescue jobs)
@@ -74,16 +94,24 @@ create table if not exists public.user_credentials (
 
 -- ────────────────────────────────────────────────────────────
 -- AGENT SESSIONS
+-- NOTE: API code uses project_name + started_at (not title + created_at)
 -- ────────────────────────────────────────────────────────────
 create table if not exists public.agent_sessions (
   id                   uuid primary key default uuid_generate_v4(),
   user_id              uuid references public.users(id) on delete cascade,
   project_id           uuid references public.projects(id) on delete set null,
   anthropic_session_id text,
-  title                text,
-  created_at           timestamptz default now(),
+  project_name         text,       -- session label (was "title" in older schema)
+  started_at           timestamptz default now(),
   ended_at             timestamptz
 );
+
+-- Add columns to existing table (safe / idempotent)
+do $$ begin
+  alter table public.agent_sessions add column if not exists project_name text;
+  alter table public.agent_sessions add column if not exists started_at timestamptz default now();
+exception when others then null;
+end $$;
 
 -- ────────────────────────────────────────────────────────────
 -- AGENT MESSAGES
@@ -111,7 +139,7 @@ create table if not exists public.payments (
 );
 
 -- ────────────────────────────────────────────────────────────
--- ADMIN NOTES
+-- ADMIN NOTES  (also stores refund requests as JSON)
 -- ────────────────────────────────────────────────────────────
 create table if not exists public.admin_notes (
   id          uuid primary key default uuid_generate_v4(),
@@ -124,13 +152,17 @@ create table if not exists public.admin_notes (
 -- ────────────────────────────────────────────────────────────
 -- INDEXES
 -- ────────────────────────────────────────────────────────────
-create index if not exists idx_users_email          on public.users(email);
-create index if not exists idx_projects_user_id     on public.projects(user_id);
-create index if not exists idx_projects_status      on public.projects(status);
-create index if not exists idx_agent_sessions_user  on public.agent_sessions(user_id);
-create index if not exists idx_agent_messages_sess  on public.agent_messages(session_id);
-create index if not exists idx_payments_user        on public.payments(user_id);
-create index if not exists idx_payments_project     on public.payments(project_id);
+create index if not exists idx_users_email              on public.users(email);
+create index if not exists idx_users_stripe_customer    on public.users(stripe_customer_id);
+create index if not exists idx_projects_user_id         on public.projects(user_id);
+create index if not exists idx_projects_status          on public.projects(status);
+create index if not exists idx_agent_sessions_user      on public.agent_sessions(user_id);
+create index if not exists idx_agent_sessions_started   on public.agent_sessions(started_at);
+create index if not exists idx_agent_messages_sess      on public.agent_messages(session_id);
+create index if not exists idx_payments_user            on public.payments(user_id);
+create index if not exists idx_payments_project         on public.payments(project_id);
+create index if not exists idx_admin_notes_user         on public.admin_notes(user_id);
+create index if not exists idx_admin_notes_project      on public.admin_notes(project_id);
 
 -- ────────────────────────────────────────────────────────────
 -- ROW LEVEL SECURITY
@@ -161,13 +193,13 @@ begin
   end loop;
 end $$;
 
--- Users
+-- Users: own row access
 create policy "users_select_own" on public.users
   for select using (auth.uid() = id);
 create policy "users_update_own" on public.users
   for update using (auth.uid() = id);
 
--- Projects
+-- Projects: own row access
 create policy "projects_select_own" on public.projects
   for select using (auth.uid() = user_id);
 create policy "projects_insert_own" on public.projects
@@ -175,7 +207,7 @@ create policy "projects_insert_own" on public.projects
 create policy "projects_update_own" on public.projects
   for update using (auth.uid() = user_id);
 
--- Credentials
+-- Credentials: own row access
 create policy "creds_select_own" on public.user_credentials
   for select using (auth.uid() = user_id);
 create policy "creds_insert_own" on public.user_credentials
@@ -183,7 +215,7 @@ create policy "creds_insert_own" on public.user_credentials
 create policy "creds_update_own" on public.user_credentials
   for update using (auth.uid() = user_id);
 
--- Agent sessions
+-- Agent sessions: own row access
 create policy "sessions_select_own" on public.agent_sessions
   for select using (auth.uid() = user_id);
 create policy "sessions_insert_own" on public.agent_sessions
@@ -197,11 +229,11 @@ create policy "messages_select_own" on public.agent_messages
     )
   );
 
--- Payments
+-- Payments: own row access
 create policy "payments_select_own" on public.payments
   for select using (auth.uid() = user_id);
 
--- Admin notes
+-- Admin notes: own row access
 create policy "notes_select_own" on public.admin_notes
   for select using (auth.uid() = user_id);
 

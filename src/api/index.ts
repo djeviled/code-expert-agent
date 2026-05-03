@@ -39,12 +39,9 @@ app.post("/api/auth/login", async (c) => {
     if (!email || !password) return c.json({ error: "Email and password are required" }, 400);
 
     const supabase = supabaseAdmin();
-
-    // Sign in via Supabase Auth
     const { data, error } = await supabase.auth.signInWithPassword({ email, password });
     if (error || !data.user) return c.json({ error: "Invalid email or password" }, 401);
 
-    // Get user profile
     const { data: profile } = await supabase
       .from("users")
       .select("*")
@@ -70,8 +67,64 @@ app.post("/api/auth/login", async (c) => {
 });
 
 // ────────────────────────────────────────────────────────────
+// AUTH — POST /api/auth/password-reset
+// ────────────────────────────────────────────────────────────
+app.post("/api/auth/password-reset", async (c) => {
+  try {
+    const { email } = await c.req.json();
+    if (!email) return c.json({ error: "Email is required" }, 400);
+
+    const supabase = supabaseAdmin();
+    const origin =
+      c.req.header("origin") ||
+      c.req.header("referer")?.replace(/\/[^/]*$/, "") ||
+      "https://code-expert-agent.vercel.app";
+
+    await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: `${origin}/reset-password`,
+    });
+
+    // Always return success — don't leak whether email exists
+    return c.json({ message: "If an account exists with this email, a reset link will be sent shortly" });
+  } catch (err) {
+    console.error("Password reset error:", err);
+    return c.json({ error: "Password reset failed" }, 500);
+  }
+});
+
+// ────────────────────────────────────────────────────────────
+// AUTH — POST /api/auth/update-password
+// ────────────────────────────────────────────────────────────
+app.post("/api/auth/update-password", async (c) => {
+  try {
+    const { token, password } = await c.req.json();
+    if (!token || !password) return c.json({ error: "Token and password are required" }, 400);
+    if (password.length < 8) return c.json({ error: "Password must be at least 8 characters" }, 400);
+
+    const supabase = supabaseAdmin();
+
+    // Verify the recovery token
+    const { data: userData, error: userError } = await supabase.auth.getUser(token);
+    if (userError || !userData?.user) {
+      return c.json({ error: "Invalid or expired reset link. Please request a new one." }, 401);
+    }
+
+    // Update password via admin API
+    const { error: updateError } = await supabase.auth.admin.updateUserById(
+      userData.user.id,
+      { password }
+    );
+    if (updateError) return c.json({ error: "Failed to update password. Please try again." }, 500);
+
+    return c.json({ message: "Password updated successfully" });
+  } catch (err) {
+    console.error("Password update error:", err);
+    return c.json({ error: "Failed to update password" }, 500);
+  }
+});
+
+// ────────────────────────────────────────────────────────────
 // AGENT — POST /api/agent/session
-// Creates a session and returns greeting
 // ────────────────────────────────────────────────────────────
 app.post("/api/agent/session", async (c) => {
   try {
@@ -80,15 +133,12 @@ app.post("/api/agent/session", async (c) => {
 
     const supabase = supabaseAdmin();
 
-    // Get user profile
     const { data: user } = await supabase
       .from("users")
       .select("*")
       .eq("email", userEmail)
       .single();
 
-    // Create session record
-    // NOTE: agent_sessions table uses project_name and started_at (not title/created_at)
     const { data: session, error } = await supabase
       .from("agent_sessions")
       .insert({
@@ -113,7 +163,6 @@ app.post("/api/agent/session", async (c) => {
       `3. What platform are you deploying to? (Vercel, Netlify, Railway, etc.)\n\n` +
       `I'll analyze everything systematically and fix it. No code left behind. 🚀`;
 
-    // Store greeting as first message
     await supabase.from("agent_messages").insert({
       session_id: session.id,
       role: "agent",
@@ -129,7 +178,6 @@ app.post("/api/agent/session", async (c) => {
 
 // ────────────────────────────────────────────────────────────
 // AGENT — POST /api/agent/message
-// Returns SSE stream with Claude's response
 // ────────────────────────────────────────────────────────────
 app.post("/api/agent/message", async (c) => {
   const { sessionId, message } = await c.req.json();
@@ -138,21 +186,18 @@ app.post("/api/agent/message", async (c) => {
   const supabase = supabaseAdmin();
   const anthropic = getAnthropic();
 
-  // Store user message
   await supabase.from("agent_messages").insert({
     session_id: sessionId,
     role: "user",
     content: message,
   });
 
-  // Get conversation history
   const { data: history } = await supabase
     .from("agent_messages")
     .select("role, content")
     .eq("session_id", sessionId)
     .order("created_at", { ascending: true });
 
-  // Build Claude messages
   const claudeMessages: { role: "user" | "assistant"; content: string }[] = (history || []).map(
     (m: any) => ({
       role: m.role === "agent" ? ("assistant" as const) : ("user" as const),
@@ -217,7 +262,6 @@ You never give up. You dig deeper. You ship working code.`,
           }
         }
 
-        // Save full response to DB
         await supabase.from("agent_messages").insert({
           session_id: sessionId,
           role: "agent",
@@ -251,7 +295,6 @@ app.post("/api/stripe/checkout", async (c) => {
   try {
     const { priceId, tier, userEmail, userName, projectDescription, projectUrl } =
       await c.req.json();
-
     if (!priceId || !userEmail) return c.json({ error: "Missing required fields" }, 400);
 
     const stripe = getStripe();
@@ -289,7 +332,6 @@ app.post("/api/stripe/webhook", async (c) => {
   const body = await c.req.text();
   const sig = c.req.header("stripe-signature") || "";
   const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET || "";
-
   const stripe = getStripe();
 
   let event: any;
@@ -305,10 +347,11 @@ app.post("/api/stripe/webhook", async (c) => {
   try {
     if (event.type === "checkout.session.completed") {
       const session = event.data.object as any;
-      const { tier, userName, projectDescription, projectUrl, type, orderId } = session.metadata || {};
+      const { tier, userName, projectDescription, projectUrl, type, orderId } =
+        session.metadata || {};
       const email = session.customer_email || "";
 
-      // Handle balance payment completion
+      // Balance payment completion
       if (type === "balance" && orderId) {
         await supabase
           .from("projects")
@@ -317,13 +360,25 @@ app.post("/api/stripe/webhook", async (c) => {
         return c.json({ received: true });
       }
 
-      // Handle upfront payment (new customer signup)
+      // Subscription checkout completion
+      if (session.mode === "subscription" && session.metadata?.userId) {
+        await supabase.from("users").update({
+          stripe_customer_id: session.customer as string,
+          subscription_status: "active",
+          subscription_tier: session.metadata?.priceId?.includes("QsSE8sGn")
+            ? "monthly_priority"
+            : "monthly_single",
+          stripe_subscription_id: session.subscription as string,
+        }).eq("id", session.metadata.userId);
+        return c.json({ received: true });
+      }
+
+      // New upfront payment / customer signup
       if (!email) {
         console.error("Webhook: no email in session");
         return c.json({ received: true });
       }
 
-      // Find or create Supabase auth user
       let userId: string | undefined;
       const { data: listData } = await supabase.auth.admin.listUsers({ perPage: 1000 });
       const existing = listData?.users?.find((u) => u.email === email);
@@ -345,24 +400,18 @@ app.post("/api/stripe/webhook", async (c) => {
 
       if (!userId) return c.json({ received: true });
 
-      // Map tier to role
       const roleMap: Record<string, string> = { tier1: "SITE", tier2: "CODE", bundle: "BUNDLE" };
       const role = roleMap[tier || "tier1"] || "SITE";
 
-      // Upsert user profile
       await supabase.from("users").upsert(
         { id: userId, email, name: userName || email.split("@")[0], role },
         { onConflict: "id" }
       );
 
-      // Balance amounts per tier
       const balanceAmounts: Record<string, number> = {
-        SITE: 9900,
-        CODE: 14900,
-        BUNDLE: 14900,
+        SITE: 9900, CODE: 14900, BUNDLE: 14900,
       };
 
-      // Create project
       await supabase.from("projects").insert({
         user_id: userId,
         tier: role,
@@ -374,7 +423,6 @@ app.post("/api/stripe/webhook", async (c) => {
         status: "pending",
       });
 
-      // Send magic link so customer can set password & log in
       try {
         await supabase.auth.admin.generateLink({ type: "magiclink", email });
       } catch (linkErr) {
@@ -385,12 +433,23 @@ app.post("/api/stripe/webhook", async (c) => {
     console.error("Webhook processing error:", err);
   }
 
+  if (event.type === "customer.subscription.updated" || event.type === "customer.subscription.deleted") {
+    const sub = event.data.object as any;
+    try {
+      await supabaseAdmin().from("users").update({
+        subscription_status: event.type === "customer.subscription.deleted" ? "canceled" : sub.status,
+        ...(event.type === "customer.subscription.deleted" ? { stripe_subscription_id: null } : {}),
+      }).eq("stripe_customer_id", sub.customer);
+    } catch (e) {
+      console.error("Subscription webhook error:", e);
+    }
+  }
+
   return c.json({ received: true });
 });
 
 // ────────────────────────────────────────────────────────────
 // PAYMENTS — POST /api/payments/balance-checkout
-// Customer-facing: create Stripe checkout for balance payment
 // ────────────────────────────────────────────────────────────
 app.post("/api/payments/balance-checkout", async (c) => {
   try {
@@ -432,6 +491,89 @@ app.post("/api/payments/balance-checkout", async (c) => {
 });
 
 // ────────────────────────────────────────────────────────────
+// STRIPE — POST /api/stripe/subscribe
+// ────────────────────────────────────────────────────────────
+app.post("/api/stripe/subscribe", async (c) => {
+  const authHeader = c.req.header("authorization") || "";
+  if (!authHeader.startsWith("Bearer ")) return c.json({ error: "Unauthorized" }, 401);
+  const token = authHeader.slice(7);
+
+  const supabase = supabaseAdmin();
+  const { data: { user }, error } = await supabase.auth.getUser(token);
+  if (error || !user) return c.json({ error: "Unauthorized" }, 401);
+
+  const { priceId } = await c.req.json();
+  if (!priceId) return c.json({ error: "priceId required" }, 400);
+
+  const { data: profile } = await supabase
+    .from("users")
+    .select("email, stripe_customer_id")
+    .eq("id", user.id)
+    .single();
+
+  const stripe = getStripe();
+  const origin = c.req.header("origin") || "https://code-expert-agent.vercel.app";
+
+  try {
+    const sessionParams: any = {
+      payment_method_types: ["card"],
+      line_items: [{ price: priceId, quantity: 1 }],
+      mode: "subscription",
+      success_url: `${origin}/dashboard?subscribed=true`,
+      cancel_url: `${origin}/dashboard`,
+      customer_email: profile?.email || user.email,
+      metadata: { userId: user.id, priceId },
+    };
+
+    if (profile?.stripe_customer_id) {
+      sessionParams.customer = profile.stripe_customer_id;
+      delete sessionParams.customer_email;
+    }
+
+    const session = await stripe.checkout.sessions.create(sessionParams);
+    return c.json({ url: session.url });
+  } catch (err: any) {
+    return c.json({ error: err.message }, 500);
+  }
+});
+
+// ────────────────────────────────────────────────────────────
+// STRIPE — POST /api/stripe/portal
+// ────────────────────────────────────────────────────────────
+app.post("/api/stripe/portal", async (c) => {
+  const authHeader = c.req.header("authorization") || "";
+  if (!authHeader.startsWith("Bearer ")) return c.json({ error: "Unauthorized" }, 401);
+  const token = authHeader.slice(7);
+
+  const supabase = supabaseAdmin();
+  const { data: { user }, error } = await supabase.auth.getUser(token);
+  if (error || !user) return c.json({ error: "Unauthorized" }, 401);
+
+  const { data: profile } = await supabase
+    .from("users")
+    .select("stripe_customer_id, email")
+    .eq("id", user.id)
+    .single();
+
+  if (!profile?.stripe_customer_id) {
+    return c.json({ error: "No billing account found. Please subscribe first." }, 400);
+  }
+
+  const stripe = getStripe();
+  const origin = c.req.header("origin") || "https://code-expert-agent.vercel.app";
+
+  try {
+    const session = await stripe.billingPortal.sessions.create({
+      customer: profile.stripe_customer_id,
+      return_url: `${origin}/dashboard`,
+    });
+    return c.json({ url: session.url });
+  } catch (err: any) {
+    return c.json({ error: err.message }, 500);
+  }
+});
+
+// ────────────────────────────────────────────────────────────
 // ADMIN AUTH MIDDLEWARE
 // ────────────────────────────────────────────────────────────
 async function requireAdmin(c: any, next: () => Promise<void>) {
@@ -440,11 +582,7 @@ async function requireAdmin(c: any, next: () => Promise<void>) {
 
   const token = authHeader.slice(7);
   const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
-  const {
-    data: { user },
-    error,
-  } = await supabase.auth.getUser(token);
-
+  const { data: { user }, error } = await supabase.auth.getUser(token);
   if (error || !user) return c.json({ error: "Unauthorized" }, 401);
 
   const { data: profile } = await supabaseAdmin()
@@ -458,6 +596,67 @@ async function requireAdmin(c: any, next: () => Promise<void>) {
   c.set("adminUser", user);
   await next();
 }
+
+// ────────────────────────────────────────────────────────────
+// USER — GET /api/user/dashboard
+// ────────────────────────────────────────────────────────────
+app.get("/api/user/dashboard", async (c) => {
+  const authHeader = c.req.header("authorization") || "";
+  if (!authHeader.startsWith("Bearer ")) return c.json({ error: "Unauthorized" }, 401);
+  const token = authHeader.slice(7);
+
+  const supabase = supabaseAdmin();
+  const { data: { user }, error } = await supabase.auth.getUser(token);
+  if (error || !user) return c.json({ error: "Unauthorized" }, 401);
+
+  const { data: profile } = await supabase
+    .from("users")
+    .select("id, email, name, role, subscription_status, subscription_tier, stripe_subscription_id")
+    .eq("id", user.id)
+    .single();
+
+  const { data: projects } = await supabase
+    .from("projects")
+    .select("id, tier, status, upfront_amount, balance_amount, description, github_repo, site_url, created_at, delivered_at")
+    .eq("user_id", user.id)
+    .order("created_at", { ascending: false });
+
+  return c.json({ user: profile || {}, projects: projects || [] });
+});
+
+// ────────────────────────────────────────────────────────────
+// USER — POST /api/user/refund-request
+// ────────────────────────────────────────────────────────────
+app.post("/api/user/refund-request", async (c) => {
+  const authHeader = c.req.header("authorization") || "";
+  if (!authHeader.startsWith("Bearer ")) return c.json({ error: "Unauthorized" }, 401);
+  const token = authHeader.slice(7);
+
+  const supabase = supabaseAdmin();
+  const { data: { user }, error } = await supabase.auth.getUser(token);
+  if (error || !user) return c.json({ error: "Unauthorized" }, 401);
+
+  const { projectId, reason } = await c.req.json();
+  if (!projectId || !reason?.trim()) return c.json({ error: "Project ID and reason are required" }, 400);
+
+  const { data: project } = await supabase
+    .from("projects")
+    .select("id, status, user_id")
+    .eq("id", projectId)
+    .eq("user_id", user.id)
+    .single();
+
+  if (!project) return c.json({ error: "Project not found" }, 404);
+
+  const { error: insertErr } = await supabase.from("admin_notes").insert({
+    user_id: user.id,
+    project_id: projectId,
+    note: JSON.stringify({ type: "refund_request", reason, status: "pending", submitted_at: new Date().toISOString() }),
+  });
+
+  if (insertErr) return c.json({ error: insertErr.message }, 500);
+  return c.json({ success: true });
+});
 
 // ────────────────────────────────────────────────────────────
 // ADMIN — GET /api/admin/stats
@@ -482,11 +681,15 @@ app.get("/api/admin/stats", requireAdmin, async (c) => {
     .filter((p) => new Date(p.created_at) >= monthStart)
     .reduce((s, p) => s + (p.upfront_amount || 0), 0);
 
-  // Count active sessions in last 24h — uses started_at column
   const { count: activeSessions } = await supabase
     .from("agent_sessions")
     .select("id", { count: "exact", head: true })
     .gte("started_at", new Date(Date.now() - 86400000).toISOString());
+
+  const { count: activeSubscriptions } = await supabase
+    .from("users")
+    .select("id", { count: "exact", head: true })
+    .eq("subscription_status", "active");
 
   return c.json({
     total_users: usersRes.count || 0,
@@ -497,6 +700,7 @@ app.get("/api/admin/stats", requireAdmin, async (c) => {
     total_revenue: totalRevenue,
     this_month_revenue: monthRevenue,
     active_sessions: activeSessions || 0,
+    active_subscriptions: activeSubscriptions || 0,
   });
 });
 
@@ -508,12 +712,11 @@ app.get("/api/admin/users", requireAdmin, async (c) => {
 
   const { data: users, error } = await supabase
     .from("users")
-    .select("id, email, name, role, sites_rescued, created_at, projects(id, status, upfront_amount)")
+    .select("id, email, name, role, sites_rescued, subscription_status, created_at, projects(id, status, upfront_amount)")
     .order("created_at", { ascending: false });
 
   if (error) return c.json({ error: error.message }, 500);
 
-  // Normalize: expose sites_rescued as credits for the admin UI
   const normalized = (users || []).map((u: any) => ({
     ...u,
     credits: u.sites_rescued ?? 0,
@@ -539,7 +742,6 @@ app.get("/api/admin/orders", requireAdmin, async (c) => {
 
 // ────────────────────────────────────────────────────────────
 // ADMIN — POST /api/admin/orders/:id/status
-// Update order status
 // ────────────────────────────────────────────────────────────
 app.post("/api/admin/orders/:id/status", requireAdmin, async (c) => {
   const orderId = c.req.param("id");
@@ -548,7 +750,10 @@ app.post("/api/admin/orders/:id/status", requireAdmin, async (c) => {
 
   const { error } = await supabase
     .from("projects")
-    .update({ status, ...(status === "delivered" ? { delivered_at: new Date().toISOString() } : {}) })
+    .update({
+      status,
+      ...(status === "delivered" ? { delivered_at: new Date().toISOString() } : {}),
+    })
     .eq("id", orderId);
 
   if (error) return c.json({ error: error.message }, 500);
@@ -557,7 +762,6 @@ app.post("/api/admin/orders/:id/status", requireAdmin, async (c) => {
 
 // ────────────────────────────────────────────────────────────
 // ADMIN — POST /api/admin/orders/:id/deliver
-// Mark delivered + create balance checkout
 // ────────────────────────────────────────────────────────────
 app.post("/api/admin/orders/:id/deliver", requireAdmin, async (c) => {
   const orderId = c.req.param("id");
@@ -572,15 +776,12 @@ app.post("/api/admin/orders/:id/deliver", requireAdmin, async (c) => {
 
   if (orderErr || !order) return c.json({ error: "Order not found" }, 404);
 
-  // Update status to awaiting payment
   await supabase
     .from("projects")
     .update({ status: "awaiting_payment", delivered_at: new Date().toISOString() })
     .eq("id", orderId);
 
-  const origin =
-    c.req.header("origin") ||
-    "https://code-expert-agent.vercel.app";
+  const origin = c.req.header("origin") || "https://code-expert-agent.vercel.app";
 
   const balancePriceIds: Record<string, string> = {
     SITE: process.env.STRIPE_SITE_BALANCE_PRICE_ID || "price_1TQt0aGusAHZYXWWVlliF9Qd",
@@ -603,7 +804,6 @@ app.post("/api/admin/orders/:id/deliver", requireAdmin, async (c) => {
     });
 
     const balanceUrl = `${origin}/pay-balance?order_id=${orderId}&tier=${order.tier.toLowerCase()}&email=${encodeURIComponent(customerEmail)}`;
-
     return c.json({ success: true, checkoutUrl: session.url, balanceUrl });
   } catch (err: any) {
     return c.json({ error: err.message }, 500);
@@ -612,14 +812,12 @@ app.post("/api/admin/orders/:id/deliver", requireAdmin, async (c) => {
 
 // ────────────────────────────────────────────────────────────
 // ADMIN — POST /api/admin/users/:id/credits
-// Uses sites_rescued column as the credits store
 // ────────────────────────────────────────────────────────────
 app.post("/api/admin/users/:id/credits", requireAdmin, async (c) => {
   const userId = c.req.param("id");
   const { action, amount } = await c.req.json();
   const supabase = supabaseAdmin();
 
-  // sites_rescued is the persistent credits field available in this schema
   const { data: user } = await supabase
     .from("users")
     .select("sites_rescued")
@@ -629,9 +827,12 @@ app.post("/api/admin/users/:id/credits", requireAdmin, async (c) => {
   const current = (user as any)?.sites_rescued || 0;
   const next = action === "add" ? current + amount : Math.max(0, current - amount);
 
-  const { error } = await supabase.from("users").update({ sites_rescued: next }).eq("id", userId);
-  if (error) return c.json({ error: error.message }, 500);
+  const { error } = await supabase
+    .from("users")
+    .update({ sites_rescued: next })
+    .eq("id", userId);
 
+  if (error) return c.json({ error: error.message }, 500);
   return c.json({ success: true, credits: next });
 });
 
@@ -644,12 +845,104 @@ app.post("/api/admin/users/:id/freeze", requireAdmin, async (c) => {
   const supabase = supabaseAdmin();
 
   if (frozen) {
-    await supabase.auth.admin.updateUserById(userId, { ban_duration: "87600h" }); // ~10 years
+    await supabase.auth.admin.updateUserById(userId, { ban_duration: "87600h" });
   } else {
     await supabase.auth.admin.updateUserById(userId, { ban_duration: "none" });
   }
 
   return c.json({ success: true });
+});
+
+// ────────────────────────────────────────────────────────────
+// ADMIN — GET /api/admin/refund-requests
+// ────────────────────────────────────────────────────────────
+app.get("/api/admin/refund-requests", requireAdmin, async (c) => {
+  const supabase = supabaseAdmin();
+
+  const { data: notes, error } = await supabase
+    .from("admin_notes")
+    .select("id, user_id, project_id, note, created_at, users(email, name), projects(tier, upfront_amount)")
+    .order("created_at", { ascending: false });
+
+  if (error) return c.json({ error: error.message }, 500);
+
+  const requests = (notes || [])
+    .filter((n: any) => {
+      try { return JSON.parse(n.note).type === "refund_request"; } catch { return false; }
+    })
+    .map((n: any) => {
+      const parsed = JSON.parse(n.note);
+      return {
+        id: n.id,
+        user_id: n.user_id,
+        project_id: n.project_id,
+        reason: parsed.reason,
+        status: parsed.status || "pending",
+        created_at: n.created_at,
+        users: n.users,
+        projects: n.projects,
+      };
+    });
+
+  return c.json({ requests });
+});
+
+// ────────────────────────────────────────────────────────────
+// ADMIN — POST /api/admin/refund-requests/:id/approve
+// ────────────────────────────────────────────────────────────
+app.post("/api/admin/refund-requests/:id/approve", requireAdmin, async (c) => {
+  const noteId = c.req.param("id");
+  const supabase = supabaseAdmin();
+  const stripe = getStripe();
+
+  const { data: note } = await supabase
+    .from("admin_notes")
+    .select("*, projects(upfront_payment_id, upfront_amount)")
+    .eq("id", noteId)
+    .single();
+
+  if (!note) return c.json({ error: "Not found" }, 404);
+
+  try {
+    const paymentIntentId = (note.projects as any)?.upfront_payment_id;
+    if (paymentIntentId) {
+      await stripe.refunds.create({ payment_intent: paymentIntentId });
+    }
+
+    const parsed = JSON.parse(note.note);
+    await supabase.from("admin_notes").update({
+      note: JSON.stringify({ ...parsed, status: "approved", resolved_at: new Date().toISOString() }),
+    }).eq("id", noteId);
+
+    if (note.project_id) {
+      await supabase.from("projects").update({ status: "failed" }).eq("id", note.project_id);
+    }
+
+    return c.json({ success: true });
+  } catch (err: any) {
+    return c.json({ error: err.message }, 500);
+  }
+});
+
+// ────────────────────────────────────────────────────────────
+// ADMIN — POST /api/admin/refund-requests/:id/deny
+// ────────────────────────────────────────────────────────────
+app.post("/api/admin/refund-requests/:id/deny", requireAdmin, async (c) => {
+  const noteId = c.req.param("id");
+  const supabase = supabaseAdmin();
+
+  const { data: note } = await supabase.from("admin_notes").select("*").eq("id", noteId).single();
+  if (!note) return c.json({ error: "Not found" }, 404);
+
+  try {
+    const parsed = JSON.parse(note.note);
+    await supabase.from("admin_notes").update({
+      note: JSON.stringify({ ...parsed, status: "denied", resolved_at: new Date().toISOString() }),
+    }).eq("id", noteId);
+    return c.json({ success: true });
+  } catch (err: any) {
+    return c.json({ error: err.message }, 500);
+  }
 });
 
 export default app;

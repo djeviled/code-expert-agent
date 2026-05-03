@@ -1,5 +1,6 @@
 import { BrowserRouter, Route, Routes, Navigate } from "react-router-dom";
 import { Analytics } from "@vercel/analytics/react";
+import { Toaster } from "sonner";
 import { AuthProvider, useAuth } from "./lib/auth-context";
 import LandingPage from "./pages/landing";
 import ChatPage from "./pages/chat";
@@ -12,11 +13,6 @@ import AdminPage from "./pages/admin";
 import DashboardPage from "./pages/dashboard";
 import PayBalancePage from "./pages/pay-balance";
 import { ThemeProvider } from "./components/theme-provider";
-import Login from "./pages/Login";
-import Signup from "./pages/Signup";
-import ForgotPassword from "./pages/ForgotPassword";
-import ResetPassword from "./pages/ResetPassword";
-
 
 /** Redirect after login: admin → /admin, everyone else → /dashboard */
 function AuthRedirect() {
@@ -54,27 +50,54 @@ export default function App() {
             <Route path="/reset-password" element={<ResetPasswordPage />} />
             <Route path="/success" element={<SuccessPage />} />
             <Route path="/pay-balance" element={<PayBalancePage />} />
-            { path: "/login", element: <Login /> },
-            { path: "/signup", element: <Signup /> },
-            { path: "/forgot-password", element: <ForgotPassword /> },
-            { path: "/reset-password", element: <ResetPassword /> },
 
             {/* Auth redirect — e.g. after login, decide where to go */}
             <Route path="/home" element={<AuthRedirect />} />
 
             {/* User dashboard */}
-            <Route path="/dashboard" element={<ProtectedRoute><DashboardPage /></ProtectedRoute>} />
+            <Route
+              path="/dashboard"
+              element={
+                <ProtectedRoute>
+                  <DashboardPage />
+                </ProtectedRoute>
+              }
+            />
 
             {/* Chat — accessible to all logged-in users */}
-            <Route path="/chat" element={<ProtectedRoute><ChatPage /></ProtectedRoute>} />
+            <Route
+              path="/chat"
+              element={
+                <ProtectedRoute>
+                  <ChatPage />
+                </ProtectedRoute>
+              }
+            />
 
             {/* Admin only */}
-            <Route path="/admin" element={<AdminRoute><AdminPage /></AdminRoute>} />
+            <Route
+              path="/admin"
+              element={
+                <AdminRoute>
+                  <AdminPage />
+                </AdminRoute>
+              }
+            />
 
             {/* Fallback */}
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
           <Analytics />
+          <Toaster
+            position="top-right"
+            toastOptions={{
+              style: {
+                background: "#1a1a2e",
+                border: "1px solid rgba(255,255,255,0.1)",
+                color: "#fff",
+              },
+            }}
+          />
         </BrowserRouter>
       </AuthProvider>
     </ThemeProvider>

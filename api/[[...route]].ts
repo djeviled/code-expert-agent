@@ -74,6 +74,63 @@ app.post("/api/auth/login", async (c) => {
 });
 
 // ────────────────────────────────────────────────────────────
+// AUTH — POST /api/auth/password-reset
+// ────────────────────────────────────────────────────────────
+app.post("/api/auth/password-reset", async (c) => {
+  try {
+    const { email } = await c.req.json();
+    if (!email) return c.json({ error: "Email is required" }, 400);
+
+    const supabase = supabaseAdmin();
+    const origin =
+      c.req.header("origin") ||
+      c.req.header("referer")?.replace(/\/[^/]*$/, "") ||
+      "https://code-expert-agent.vercel.app";
+
+    await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: `${origin}/reset-password`,
+    });
+
+    // Always return success — don't leak whether email exists
+    return c.json({ message: "If an account exists with this email, a reset link will be sent shortly" });
+  } catch (err) {
+    console.error("Password reset error:", err);
+    return c.json({ error: "Password reset failed" }, 500);
+  }
+});
+
+// ────────────────────────────────────────────────────────────
+// AUTH — POST /api/auth/update-password
+// ────────────────────────────────────────────────────────────
+app.post("/api/auth/update-password", async (c) => {
+  try {
+    const { token, password } = await c.req.json();
+    if (!token || !password) return c.json({ error: "Token and password are required" }, 400);
+    if (password.length < 8) return c.json({ error: "Password must be at least 8 characters" }, 400);
+
+    const supabase = supabaseAdmin();
+
+    // Verify the recovery token and get the user
+    const { data: userData, error: userError } = await supabase.auth.getUser(token);
+    if (userError || !userData?.user) {
+      return c.json({ error: "Invalid or expired reset link. Please request a new one." }, 401);
+    }
+
+    // Update password via admin API (bypasses session requirement)
+    const { error: updateError } = await supabase.auth.admin.updateUserById(
+      userData.user.id,
+      { password }
+    );
+    if (updateError) return c.json({ error: "Failed to update password. Please try again." }, 500);
+
+    return c.json({ message: "Password updated successfully" });
+  } catch (err) {
+    console.error("Password update error:", err);
+    return c.json({ error: "Failed to update password" }, 500);
+  }
+});
+
+// ────────────────────────────────────────────────────────────
 // AGENT — POST /api/agent/session
 // Creates a session and returns greeting
 // NOTE: DB uses project_name + started_at (not title/created_at)

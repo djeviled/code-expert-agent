@@ -8,7 +8,7 @@
     "module": "esnext",
     "target": "esnext",
     "lib": ["ESNext", "DOM"],
-    "types": ["vite/client", "node"],
+    "types": ["vite/client", "node", "bun"],
     "skipLibCheck": true,
     "baseUrl": ".",
     "paths": {

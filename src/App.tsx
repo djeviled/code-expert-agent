@@ -13,6 +13,7 @@ import AdminPage from "./pages/admin";
 import DashboardPage from "./pages/dashboard";
 import PayBalancePage from "./pages/pay-balance";
 import { ThemeProvider } from "./components/theme-provider";
+import ErrorBoundary from "./components/error-boundary";
 
 /** Redirect after login: admin → /admin, everyone else → /dashboard */
 function AuthRedirect() {
@@ -38,6 +39,7 @@ function AdminRoute({ children }: { children: React.ReactNode }) {
 
 export default function App() {
   return (
+    <ErrorBoundary>
     <ThemeProvider>
       <AuthProvider>
         <BrowserRouter>
@@ -101,5 +103,6 @@ export default function App() {
         </BrowserRouter>
       </AuthProvider>
     </ThemeProvider>
+    </ErrorBoundary>
   );
 }

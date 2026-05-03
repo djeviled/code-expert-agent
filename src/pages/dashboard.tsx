@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "../lib/auth-context";
 import {
   MessageSquare, Plus, Clock, CheckCircle, AlertCircle, CreditCard,
@@ -75,6 +75,7 @@ const TIER_LABELS: Record<string, string> = {
 export default function DashboardPage() {
   const { user, token, logout } = useAuth();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [data, setData] = useState<UserDashboardData | null>(null);
   const [loading, setLoading] = useState(true);
   const [subscribing, setSubscribing] = useState(false);
@@ -106,6 +107,14 @@ export default function DashboardPage() {
   }, [token]);
 
   useEffect(() => { fetchDashboard(); }, [fetchDashboard]);
+
+  // Show success toast when redirected back from Stripe subscription checkout
+  useEffect(() => {
+    if (searchParams.get("subscribed") === "true") {
+      showToast("🎉 Subscription activated! Welcome to monthly maintenance.");
+      setSearchParams({}, { replace: true });
+    }
+  }, []);
 
   const handleSubscribe = async (priceId: string) => {
     setSubscribing(true);

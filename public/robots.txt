@@ -1,0 +1,11 @@
+User-agent: *
+Allow: /
+Allow: /login
+Allow: /signup
+
+Disallow: /dashboard
+Disallow: /admin
+Disallow: /chat
+Disallow: /api/
+
+Sitemap: https://www.codeexpertagent.com/sitemap.xml

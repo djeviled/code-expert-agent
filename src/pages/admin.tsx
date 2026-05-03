@@ -5,7 +5,7 @@ import {
   Users, CreditCard, ShoppingCart, DollarSign, Activity, Search,
   RefreshCw, Ban, CheckCircle, AlertCircle, Clock, Plus, Minus,
   X, Loader, ExternalLink, Truck, LogOut, Star, MessageSquare,
-  Bell, TrendingUp, ArrowUpRight,
+  Bell, TrendingUp, ArrowUpRight, LayoutDashboard,
 } from "lucide-react";
 
 type Tab = "overview" | "orders" | "users" | "subscriptions" | "refunds";
@@ -217,6 +217,36 @@ export default function AdminDashboard() {
             </Link>
           </div>
           <div className="flex items-center gap-3">
+            {/* ── User-side links ── */}
+            <Link
+              to="/dashboard"
+              className="hidden sm:flex items-center gap-1.5 text-xs text-gray-400 hover:text-white bg-white/5 hover:bg-white/10 border border-white/10 px-3 py-1.5 rounded-lg transition"
+              title="Open user dashboard"
+            >
+              <LayoutDashboard className="w-3.5 h-3.5" />
+              Dashboard
+            </Link>
+            <Link
+              to="/chat"
+              className="hidden sm:flex items-center gap-1.5 text-xs text-gray-400 hover:text-white bg-white/5 hover:bg-white/10 border border-white/10 px-3 py-1.5 rounded-lg transition"
+              title="Open agent chat"
+            >
+              <MessageSquare className="w-3.5 h-3.5" />
+              Chat
+            </Link>
+
+            {/* ── Mobile: single dropdown-style button ── */}
+            <div className="flex sm:hidden items-center gap-1">
+              <Link to="/dashboard" className="p-2 text-gray-400 hover:text-white" title="User dashboard">
+                <LayoutDashboard className="w-4 h-4" />
+              </Link>
+              <Link to="/chat" className="p-2 text-gray-400 hover:text-white" title="Agent chat">
+                <MessageSquare className="w-4 h-4" />
+              </Link>
+            </div>
+
+            <div className="w-px h-5 bg-white/10" />
+
             {pendingRefunds.length > 0 && (
               <button onClick={() => setActiveTab("refunds")} className="relative p-2 text-orange-400 hover:bg-white/10 rounded-lg">
                 <Bell className="w-5 h-5" />

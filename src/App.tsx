@@ -6,6 +6,8 @@ import ChatPage from "./pages/chat";
 import SignupPage from "./pages/signup";
 import SuccessPage from "./pages/success";
 import LoginPage from "./pages/login";
+import ForgotPasswordPage from "./pages/ForgotPassword";
+import ResetPasswordPage from "./pages/ResetPassword";
 import AdminPage from "./pages/admin";
 import DashboardPage from "./pages/dashboard";
 import PayBalancePage from "./pages/pay-balance";
@@ -43,6 +45,8 @@ export default function App() {
             <Route path="/" element={<LandingPage />} />
             <Route path="/login" element={<LoginPage />} />
             <Route path="/signup" element={<SignupPage />} />
+            <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+            <Route path="/reset-password" element={<ResetPasswordPage />} />
             <Route path="/success" element={<SuccessPage />} />
             <Route path="/pay-balance" element={<PayBalancePage />} />
 

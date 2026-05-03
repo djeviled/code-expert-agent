@@ -3,10 +3,19 @@
   "outputDirectory": "dist",
   "installCommand": "npm install",
   "framework": null,
+  "crons": [
+    {
+      "path": "/api/cron/deadline",
+      "schedule": "0 8 * * *"
+    }
+  ],
   "functions": {
     "api/[[...route]].ts": {
       "maxDuration": 300,
       "includeFiles": "src/**"
+    },
+    "api/cron/deadline.ts": {
+      "maxDuration": 60
     }
   },
   "rewrites": [

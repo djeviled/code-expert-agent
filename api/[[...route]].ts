@@ -562,6 +562,7 @@ app.post("/api/stripe/webhook", async (c) => {
     console.error("Webhook processing error:", err);
   }
 
+  // ── Subscription lifecycle ──
   if (event.type === "customer.subscription.updated" || event.type === "customer.subscription.deleted") {
     const sub = event.data.object as any;
     try {
@@ -571,6 +572,63 @@ app.post("/api/stripe/webhook", async (c) => {
       }).eq("stripe_customer_id", sub.customer);
     } catch (e) {
       console.error("Subscription webhook error:", e);
+    }
+  }
+
+  // ── Invoice payment failed → log to admin_notes ──
+  if (event.type === "invoice.payment_failed") {
+    const invoice = event.data.object as any;
+    try {
+      const supabase = supabaseAdmin();
+      const { data: user } = await supabase
+        .from("users")
+        .select("id")
+        .eq("stripe_customer_id", invoice.customer)
+        .single();
+      if (user?.id) {
+        await supabase.from("admin_notes").insert({
+          user_id: user.id,
+          project_id: null,
+          note: JSON.stringify({
+            type: "invoice_payment_failed",
+            invoice_id: invoice.id,
+            amount_due: invoice.amount_due,
+            attempt_count: invoice.attempt_count,
+            customer_email: invoice.customer_email,
+            failed_at: new Date().toISOString(),
+          }),
+        });
+      }
+    } catch (e) { console.error("invoice.payment_failed handler error:", e); }
+  }
+
+  // ── Checkout expired → mark pending project as failed so admin is alerted ──
+  if (event.type === "checkout.session.expired") {
+    const session = event.data.object as any;
+    const { type, orderId } = session.metadata || {};
+    // Only act on expired balance checkouts (upfront expiry is fine — user can restart)
+    if (type === "balance" && orderId) {
+      try {
+        // Don't auto-fail — just log so admin knows customer didn't complete balance
+        const supabase = supabaseAdmin();
+        const { data: proj } = await supabase
+          .from("projects")
+          .select("id, user_id")
+          .eq("id", orderId)
+          .single();
+        if (proj) {
+          await supabase.from("admin_notes").insert({
+            user_id: proj.user_id,
+            project_id: orderId,
+            note: JSON.stringify({
+              type: "balance_checkout_expired",
+              session_id: session.id,
+              customer_email: session.customer_email,
+              expired_at: new Date().toISOString(),
+            }),
+          });
+        }
+      } catch (e) { console.error("checkout.session.expired handler error:", e); }
     }
   }
 
@@ -774,16 +832,17 @@ app.post("/api/admin/orders/:id/deliver", requireAdmin, async (c) => {
     .update({ status: "awaiting_payment", delivered_at: new Date().toISOString() })
     .eq("id", orderId);
 
-  const origin = c.req.header("origin") || "https://codeexpertagent.com";
+  const origin = c.req.header("origin") || "https://www.codeexpertagent.com";
 
   const balancePriceIds: Record<string, string> = {
-    SITE: process.env.STRIPE_SITE_BALANCE_PRICE_ID || "price_1TQt0aGusAHZYXWWVlliF9Qd",
-    CODE: process.env.STRIPE_CODE_BALANCE_PRICE_ID || "price_1TQt0aGusAHZYXWWaopyNgvy",
+    SITE:   process.env.STRIPE_SITE_BALANCE_PRICE_ID   || "price_1TQt0aGusAHZYXWWVlliF9Qd",
+    CODE:   process.env.STRIPE_CODE_BALANCE_PRICE_ID   || "price_1TQt0aGusAHZYXWWaopyNgvy",
     BUNDLE: process.env.STRIPE_BUNDLE_BALANCE_PRICE_ID || "price_1TQt0aGusAHZYXWWxEwTktKL",
   };
 
-  const priceId = balancePriceIds[order.tier] || balancePriceIds.SITE;
+  const priceId      = balancePriceIds[order.tier] || balancePriceIds.SITE;
   const customerEmail = (order.users as any)?.email || "";
+  const balanceUrl    = `${origin}/pay-balance?order_id=${orderId}&tier=${order.tier.toLowerCase()}&email=${encodeURIComponent(customerEmail)}`;
 
   try {
     const session = await stripe.checkout.sessions.create({
@@ -791,12 +850,27 @@ app.post("/api/admin/orders/:id/deliver", requireAdmin, async (c) => {
       line_items: [{ price: priceId, quantity: 1 }],
       mode: "payment",
       success_url: `${origin}/success?type=balance&order_id=${orderId}`,
-      cancel_url: `${origin}/pay-balance?order_id=${orderId}&tier=${order.tier}&email=${encodeURIComponent(customerEmail)}`,
+      cancel_url: balanceUrl,
       customer_email: customerEmail,
       metadata: { type: "balance", orderId, tier: order.tier },
     });
 
-    const balanceUrl = `${origin}/pay-balance?order_id=${orderId}&tier=${order.tier.toLowerCase()}&email=${encodeURIComponent(customerEmail)}`;
+    // ── Email customer: project delivered, balance due ──
+    // Uses Supabase magic-link email → redirects straight to pay-balance page
+    if (customerEmail) {
+      try {
+        await supabaseAdmin().auth.admin.generateLink({
+          type: "magiclink",
+          email: customerEmail,
+          options: {
+            redirectTo: balanceUrl,
+          },
+        });
+      } catch (emailErr: any) {
+        // Non-fatal — admin still gets the URL to share manually
+        console.error("Balance notification email error (non-fatal):", emailErr.message);
+      }
+    }
 
     return c.json({ success: true, checkoutUrl: session.url, balanceUrl });
   } catch (err: any) {

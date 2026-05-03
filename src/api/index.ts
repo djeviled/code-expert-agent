@@ -869,8 +869,9 @@ app.post("/api/admin/orders/:id/deliver", requireAdmin, async (c) => {
     BUNDLE: process.env.STRIPE_BUNDLE_BALANCE_PRICE_ID || "price_1TQt0aGusAHZYXWWxEwTktKL",
   };
 
-  const priceId = balancePriceIds[order.tier] || balancePriceIds.SITE;
+  const priceId       = balancePriceIds[order.tier] || balancePriceIds.SITE;
   const customerEmail = (order.users as any)?.email || "";
+  const balanceUrl    = `${origin}/pay-balance?order_id=${orderId}&tier=${order.tier.toLowerCase()}&email=${encodeURIComponent(customerEmail)}`;
 
   try {
     const session = await stripe.checkout.sessions.create({
@@ -878,12 +879,24 @@ app.post("/api/admin/orders/:id/deliver", requireAdmin, async (c) => {
       line_items: [{ price: priceId, quantity: 1 }],
       mode: "payment",
       success_url: `${origin}/success?type=balance&order_id=${orderId}`,
-      cancel_url: `${origin}/pay-balance?order_id=${orderId}&tier=${order.tier}&email=${encodeURIComponent(customerEmail)}`,
+      cancel_url: balanceUrl,
       customer_email: customerEmail,
       metadata: { type: "balance", orderId, tier: order.tier },
     });
 
-    const balanceUrl = `${origin}/pay-balance?order_id=${orderId}&tier=${order.tier.toLowerCase()}&email=${encodeURIComponent(customerEmail)}`;
+    // Email customer: project delivered, balance due
+    if (customerEmail) {
+      try {
+        await supabaseAdmin().auth.admin.generateLink({
+          type: "magiclink",
+          email: customerEmail,
+          options: { redirectTo: balanceUrl },
+        });
+      } catch (emailErr: any) {
+        console.error("Balance notification email error (non-fatal):", emailErr.message);
+      }
+    }
+
     return c.json({ success: true, checkoutUrl: session.url, balanceUrl });
   } catch (err: any) {
     return c.json({ error: err.message }, 500);

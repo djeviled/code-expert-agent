@@ -10,6 +10,11 @@ import AdminPage from "./pages/admin";
 import DashboardPage from "./pages/dashboard";
 import PayBalancePage from "./pages/pay-balance";
 import { ThemeProvider } from "./components/theme-provider";
+import Login from "./pages/Login";
+import Signup from "./pages/Signup";
+import ForgotPassword from "./pages/ForgotPassword";
+import ResetPassword from "./pages/ResetPassword";
+
 
 /** Redirect after login: admin → /admin, everyone else → /dashboard */
 function AuthRedirect() {
@@ -45,6 +50,10 @@ export default function App() {
             <Route path="/signup" element={<SignupPage />} />
             <Route path="/success" element={<SuccessPage />} />
             <Route path="/pay-balance" element={<PayBalancePage />} />
+            { path: "/login", element: <Login /> },
+            { path: "/signup", element: <Signup /> },
+            { path: "/forgot-password", element: <ForgotPassword /> },
+            { path: "/reset-password", element: <ResetPassword /> },
 
             {/* Auth redirect — e.g. after login, decide where to go */}
             <Route path="/home" element={<AuthRedirect />} />

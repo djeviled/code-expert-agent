@@ -78,7 +78,7 @@ app.post("/api/auth/password-reset", async (c) => {
     const origin =
       c.req.header("origin") ||
       c.req.header("referer")?.replace(/\/[^/]*$/, "") ||
-      "https://code-expert-agent.vercel.app";
+      "https://codeexpertagent.com";
 
     await supabase.auth.resetPasswordForEmail(email, {
       redirectTo: `${origin}/reset-password`,
@@ -301,7 +301,7 @@ app.post("/api/stripe/checkout", async (c) => {
     const origin =
       c.req.header("origin") ||
       c.req.header("referer")?.replace(/\/$/, "") ||
-      "https://code-expert-agent.vercel.app";
+      "https://codeexpertagent.com";
 
     const session = await stripe.checkout.sessions.create({
       payment_method_types: ["card"],
@@ -460,7 +460,7 @@ app.post("/api/payments/balance-checkout", async (c) => {
     const origin =
       c.req.header("origin") ||
       c.req.header("referer")?.replace(/\/$/, "") ||
-      "https://code-expert-agent.vercel.app";
+      "https://codeexpertagent.com";
 
     const balancePriceIds: Record<string, string> = {
       tier1: process.env.STRIPE_SITE_BALANCE_PRICE_ID || "price_1TQt0aGusAHZYXWWVlliF9Qd",
@@ -512,7 +512,7 @@ app.post("/api/stripe/subscribe", async (c) => {
     .single();
 
   const stripe = getStripe();
-  const origin = c.req.header("origin") || "https://code-expert-agent.vercel.app";
+  const origin = c.req.header("origin") || "https://codeexpertagent.com";
 
   try {
     const sessionParams: any = {
@@ -560,7 +560,7 @@ app.post("/api/stripe/portal", async (c) => {
   }
 
   const stripe = getStripe();
-  const origin = c.req.header("origin") || "https://code-expert-agent.vercel.app";
+  const origin = c.req.header("origin") || "https://codeexpertagent.com";
 
   try {
     const session = await stripe.billingPortal.sessions.create({
@@ -781,7 +781,7 @@ app.post("/api/admin/orders/:id/deliver", requireAdmin, async (c) => {
     .update({ status: "awaiting_payment", delivered_at: new Date().toISOString() })
     .eq("id", orderId);
 
-  const origin = c.req.header("origin") || "https://code-expert-agent.vercel.app";
+  const origin = c.req.header("origin") || "https://codeexpertagent.com";
 
   const balancePriceIds: Record<string, string> = {
     SITE: process.env.STRIPE_SITE_BALANCE_PRICE_ID || "price_1TQt0aGusAHZYXWWVlliF9Qd",

@@ -13,9 +13,6 @@
     "api/[[...route]].ts": {
       "maxDuration": 300,
       "includeFiles": "src/**"
-    },
-    "api/cron/deadline.ts": {
-      "maxDuration": 60
     }
   },
   "rewrites": [

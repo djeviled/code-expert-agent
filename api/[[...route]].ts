@@ -1241,9 +1241,104 @@ app.post("/api/stripe/subscription-webhook", async (c) => {
 });
 
 // ────────────────────────────────────────────────────────────
-// ADMIN — GET /api/admin/stats (updated with subscription count)
+// CRON — GET /api/cron/deadline  (runs daily at 08:00 UTC)
+// Enforces 7-day delivery guarantee + sends balance reminders
+// Called by Vercel Cron — secured with CRON_SECRET header
 // ────────────────────────────────────────────────────────────
-// (already defined above — this override adds active_subscriptions)
+app.get("/api/cron/deadline", async (c) => {
+  const cronSecret = process.env.CRON_SECRET || "";
+  const auth = c.req.header("authorization") || "";
+  // Vercel cron passes the secret automatically; manual calls need it too
+  if (cronSecret && auth !== `Bearer ${cronSecret}`) {
+    return c.json({ error: "Unauthorized" }, 401);
+  }
+
+  const supabase = supabaseAdmin();
+  const stripe   = getStripe();
+  const origin   = "https://www.codeexpertagent.com";
+
+  const sevenDaysAgo    = new Date(Date.now() - 7  * 24 * 60 * 60 * 1000).toISOString();
+  const fourteenDaysAgo = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString();
+
+  const results = { autoRefunded: 0, remindersSent: 0, errors: [] as string[] };
+
+  // ── 1. AUTO-REFUND: pending/in_progress projects > 7 days old ──
+  const { data: overdueProjects } = await supabase
+    .from("projects")
+    .select("id, tier, upfront_amount, upfront_payment_id, user_id, users(email, name)")
+    .in("status", ["pending", "in_progress"])
+    .lt("created_at", sevenDaysAgo);
+
+  for (const project of overdueProjects || []) {
+    try {
+      // Issue Stripe refund on the upfront payment
+      if (project.upfront_payment_id) {
+        await stripe.refunds.create({
+          payment_intent: project.upfront_payment_id,
+          metadata: { project_id: project.id, reason: "7-day delivery guarantee auto-refund" },
+        });
+      }
+
+      // Mark project failed
+      await supabase
+        .from("projects")
+        .update({ status: "failed" })
+        .eq("id", project.id);
+
+      // Notify customer via magic link email
+      const customerEmail = (project.users as any)?.email;
+      if (customerEmail) {
+        await supabase.auth.admin.generateLink({
+          type: "magiclink",
+          email: customerEmail,
+          options: { redirectTo: `${origin}/dashboard` },
+        }).catch(() => {});
+      }
+
+      // Log to admin_notes
+      await supabase.from("admin_notes").insert({
+        user_id: project.user_id,
+        project_id: project.id,
+        note: JSON.stringify({
+          type: "auto_refund",
+          reason: "7-day delivery guarantee not met",
+          refunded_amount: project.upfront_amount,
+          triggered_at: new Date().toISOString(),
+        }),
+      });
+
+      results.autoRefunded++;
+    } catch (err: any) {
+      results.errors.push(`project ${project.id}: ${err.message}`);
+    }
+  }
+
+  // ── 2. BALANCE REMINDER: awaiting_payment > 14 days ──
+  const { data: awaitingProjects } = await supabase
+    .from("projects")
+    .select("id, tier, balance_amount, user_id, users(email, name)")
+    .eq("status", "awaiting_payment")
+    .lt("delivered_at", fourteenDaysAgo);
+
+  for (const project of awaitingProjects || []) {
+    try {
+      const customerEmail = (project.users as any)?.email;
+      if (customerEmail) {
+        const payUrl = `${origin}/pay-balance?order_id=${project.id}&tier=${project.tier.toLowerCase()}&email=${encodeURIComponent(customerEmail)}`;
+        await supabase.auth.admin.generateLink({
+          type: "magiclink",
+          email: customerEmail,
+          options: { redirectTo: payUrl },
+        }).catch(() => {});
+        results.remindersSent++;
+      }
+    } catch (err: any) {
+      results.errors.push(`reminder ${project.id}: ${err.message}`);
+    }
+  }
+
+  return c.json({ ok: true, timestamp: new Date().toISOString(), ...results });
+});
 
 // ────────────────────────────────────────────────────────────
 // VERCEL HANDLER

@@ -150,7 +150,28 @@ create table if not exists public.admin_notes (
 );
 
 -- ────────────────────────────────────────────────────────────
--- PROMO CODES
+-- ADMIN CREDENTIALS  (API keys stored AES-256 encrypted)
+-- Encrypted with pgp_sym_encrypt using CREDENTIAL_ENCRYPTION_KEY env var
+-- Decrypted on read with: pgp_sym_decrypt(decode(encrypted_value,'base64'), key)
+-- ────────────────────────────────────────────────────────────
+create table if not exists public.admin_credentials (
+  id               uuid primary key default uuid_generate_v4(),
+  user_id          uuid references public.users(id) on delete cascade,
+  service          text not null,       -- 'stripe' | 'github' | 'vercel' | 'supabase' | 'anthropic' | 'groq'
+  key_name         text not null,       -- e.g. 'secret_key', 'webhook_secret', 'pat_primary'
+  encrypted_value  text not null,       -- base64(pgp_sym_encrypt(plaintext, ENCRYPTION_KEY))
+  created_at       timestamptz default now(),
+  updated_at       timestamptz default now(),
+  unique(user_id, service, key_name)
+);
+
+create index if not exists idx_admin_creds_user    on public.admin_credentials(user_id);
+create index if not exists idx_admin_creds_service on public.admin_credentials(service);
+
+alter table public.admin_credentials enable row level security;
+-- Service role key bypasses RLS; no user-facing access needed
+
+-- ────────────────────────────────────────────────────────────
 -- ────────────────────────────────────────────────────────────
 create table if not exists public.promo_codes (
   id                  uuid primary key default uuid_generate_v4(),

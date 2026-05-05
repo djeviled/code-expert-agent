@@ -24,12 +24,25 @@ export interface PricingTier {
   credits: number;
 }
 
+// ── INTRODUCTORY OFFER ──────────────────────────────────────────────────────
+// Special launch pricing: one flat fee, NO balance due on delivery.
+// Normal prices: SITE $148 | CODE $228 | BUNDLE $299
+// Intro prices:  SITE $49  | CODE $79  | BUNDLE $119
+// ────────────────────────────────────────────────────────────────────────────
+
+export const INTRO_OFFER = {
+  active: true,
+  label: "🚨 INTRODUCTORY OFFER — LIMITED TIME",
+  subLabel: "One flat fee. No balance due when we deliver. Ever.",
+  normalPrices: { site: "$148", code: "$228", bundle: "$299" },
+} as const;
+
 export const PRICING_TIERS: PricingTier[] = [
   {
     id: "tier1",
     name: "SITE Rescue",
     tier: 1,
-    price: { upfront: "$49", onDelivery: "$99", total: "$148" },
+    price: { upfront: "$49", onDelivery: "$0", total: "$49" },
     description: "Your AI-generated site, broken and stalled? We fix it and deploy it live.",
     features: [
       "Agent analyzes your broken site code",
@@ -37,6 +50,7 @@ export const PRICING_TIERS: PricingTier[] = [
       "Deploys to Vercel — live URL delivered",
       "One project / one repository",
       "Code delivered error-free",
+      "✦ No balance due — ever",
     ],
     priceId: STRIPE_PRICES.SITE_UPFRONT,
     credits: 1,
@@ -45,7 +59,7 @@ export const PRICING_TIERS: PricingTier[] = [
     id: "tier2",
     name: "CODE Rescue",
     tier: 2,
-    price: { upfront: "$79", onDelivery: "$149", total: "$228" },
+    price: { upfront: "$79", onDelivery: "$0", total: "$79" },
     description: "Your code almost works — but won't compile? We dig in and fix it.",
     features: [
       "Agent digs into your broken AI code",
@@ -53,6 +67,7 @@ export const PRICING_TIERS: PricingTier[] = [
       "Zero errors guaranteed",
       "Code review report included",
       "One project / one repository",
+      "✦ No balance due — ever",
     ],
     priceId: STRIPE_PRICES.CODE_UPFRONT,
     credits: 2,
@@ -62,17 +77,18 @@ export const PRICING_TIERS: PricingTier[] = [
     id: "bundle",
     name: "Bundle — Site + Code",
     tier: 3,
-    price: { upfront: "$79", onDelivery: "$149", total: "$228" },
-    description: "Site + Code rescued together. Perfect for full-stack projects.",
+    price: { upfront: "$119", onDelivery: "$0", total: "$119" },
+    description: "Site + Code rescued together. Full-stack fix in one shot — normally $299.",
     features: [
       "Agent fixes your site AND code together",
       "Full deployment to Vercel",
       "Everything delivered error-free",
       "One project / one repository",
       "Priority support",
+      "✦ No balance due — ever",
     ],
     priceId: STRIPE_PRICES.BUNDLE_UPFRONT,
-    credits: 2,
+    credits: 3,
   },
 ];
 

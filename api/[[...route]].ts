@@ -520,17 +520,20 @@ app.post("/api/stripe/webhook", async (c) => {
         { onConflict: "id" }
       );
 
-      const balanceAmounts: Record<string, number> = {
-        SITE: 9900,
-        CODE: 14900,
-        BUNDLE: 14900,
-      };
+      // ── INTRODUCTORY OFFER: balance = $0 — full service included in upfront ──
+      // Normal balance amounts (for future reference when intro ends):
+      //   SITE: $99 (9900), CODE: $149 (14900), BUNDLE: $149 (14900)
+      // During intro period, no balance is ever charged.
+      const INTRO_OFFER_ACTIVE = true;
+      const balanceAmounts: Record<string, number> = INTRO_OFFER_ACTIVE
+        ? { SITE: 0, CODE: 0, BUNDLE: 0 }
+        : { SITE: 9900, CODE: 14900, BUNDLE: 14900 };
 
       await supabase.from("projects").insert({
         user_id: userId,
         tier: role,
         upfront_amount: session.amount_total || 0,
-        balance_amount: balanceAmounts[role] || 9900,
+        balance_amount: balanceAmounts[role] ?? 0,
         upfront_payment_id: (session.payment_intent as string) || "",
         description: projectDescription || "",
         github_repo: projectUrl || "",

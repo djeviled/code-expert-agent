@@ -1,52 +1,57 @@
 import { Link } from "react-router-dom";
-import { Check, ArrowRight, Zap, Shield, Clock, Star, RefreshCw } from "lucide-react";
+import { Check, ArrowRight, Zap, Shield, Clock, Star, RefreshCw, Flame, AlertTriangle } from "lucide-react";
 
 const TIERS = [
   {
     key: "tier1",
     name: "SITE Rescue",
     tagline: "Your AI-generated site, broken and stalled?",
-    upfront: "$49",
-    balance: "$99",
-    total: "$148",
+    introPrice: "$49",
+    normalPrice: "$148",
+    savings: "Save $99",
     features: [
       "Fixes your broken site code",
       "Resolves errors & dependency issues",
       "Live deployment to Vercel",
       "Covers ONE project / repository",
+      "No balance due — ever",
     ],
-    cta: "Start Site Rescue",
+    cta: "Claim Site Rescue",
   },
   {
     key: "tier2",
     name: "CODE Rescue",
     tagline: "Your code almost works — but won't compile?",
-    upfront: "$79",
-    balance: "$149",
-    total: "$228",
+    introPrice: "$79",
+    normalPrice: "$228",
+    savings: "Save $149",
     features: [
       "Fixes syntax, logic & integration errors",
       "Zero build errors guaranteed",
       "Full code review report",
       "Covers ONE project / repository",
+      "No balance due — ever",
     ],
-    cta: "Start Code Rescue",
+    cta: "Claim Code Rescue",
     highlighted: true,
   },
   {
     key: "bundle",
     name: "Full-Stack Bundle",
     tagline: "Site + Code — everything rescued together",
-    upfront: "$79",
-    balance: "$149",
-    total: "$228",
+    introPrice: "$119",
+    normalPrice: "$299",
+    savings: "Save $180",
+    isBestDeal: true,
     features: [
       "Fixes site AND code together",
       "Full deployment to Vercel",
       "Everything error-free",
+      "Priority support",
       "Covers ONE project / repository",
+      "No balance due — ever",
     ],
-    cta: "Start Bundle Rescue",
+    cta: "Claim Bundle Deal",
   },
 ];
 
@@ -99,7 +104,7 @@ const HOW_STEPS = [
     num: "03",
     icon: <Check className="w-6 h-6 text-green-400" />,
     title: "You Get a Live URL",
-    desc: "Deployed to Vercel. Working code. You pay the balance — and keep the site.",
+    desc: "Deployed to Vercel. Working code. Done. No balance, no surprises — just a live site.",
   },
 ];
 
@@ -150,7 +155,7 @@ export default function LandingPage() {
         </div>
         <div className="flex items-center justify-center gap-6 mt-12 text-sm text-gray-500">
           <span className="flex items-center gap-1.5"><Shield className="w-4 h-4 text-green-400" /> Risk-free guarantee</span>
-          <span className="hidden sm:flex items-center gap-1.5"><Check className="w-4 h-4 text-blue-400" /> Pay balance on delivery</span>
+          <span className="hidden sm:flex items-center gap-1.5"><Flame className="w-4 h-4 text-orange-400" /> Intro prices — one flat fee</span>
           <span className="hidden md:flex items-center gap-1.5"><RefreshCw className="w-4 h-4 text-yellow-400" /> Monthly maintenance available</span>
         </div>
       </section>
@@ -179,8 +184,15 @@ export default function LandingPage() {
         </div>
       </section>
 
-      {/* Important Clarity Banner */}
-      <section className="px-6 md:px-8 py-4 max-w-4xl mx-auto">
+      {/* Introductory Offer Urgency Banner */}
+      <section className="px-6 md:px-8 py-6 max-w-5xl mx-auto">
+        {/* Top alert strip */}
+        <div className="flex items-center justify-center gap-3 bg-gradient-to-r from-orange-500/20 via-red-500/15 to-orange-500/20 border border-orange-500/40 rounded-xl px-6 py-3 mb-6 text-sm font-medium text-orange-300">
+          <AlertTriangle className="w-4 h-4 text-orange-400 flex-shrink-0" />
+          <span>Introductory pricing is a <strong className="text-orange-200">one-time launch offer</strong> — once it's gone, regular prices apply permanently.</span>
+          <AlertTriangle className="w-4 h-4 text-orange-400 flex-shrink-0" />
+        </div>
+
         <div className="bg-[#111827] border border-blue-500/20 rounded-2xl p-6 grid sm:grid-cols-3 gap-6 text-sm">
           <div className="flex items-start gap-3">
             <div className="w-8 h-8 bg-blue-500/20 rounded-lg flex items-center justify-center flex-shrink-0">
@@ -196,8 +208,8 @@ export default function LandingPage() {
               <Shield className="w-4 h-4 text-green-400" />
             </div>
             <div>
-              <p className="font-semibold text-white mb-1">Risk-Free Guarantee</p>
-              <p className="text-gray-400">You only pay the balance if we successfully deploy your working project. If we can't, you get refunded.</p>
+              <p className="font-semibold text-white mb-1">No Balance. Ever.</p>
+              <p className="text-gray-400">Introductory pricing is all-inclusive. Pay once, we fix it, you keep the site. Zero surprise charges.</p>
             </div>
           </div>
           <div className="flex items-start gap-3">
@@ -212,59 +224,117 @@ export default function LandingPage() {
         </div>
       </section>
 
-      {/* Rescue Pricing */}
+      {/* Rescue Pricing — Introductory Offer */}
       <section id="pricing" className="px-6 md:px-8 py-20 max-w-6xl mx-auto">
-        <h2 className="text-4xl font-bold text-center mb-2">Rescue Plans</h2>
-        <p className="text-gray-400 text-center mb-4 max-w-xl mx-auto">
-          One-time fee per project. Pay upfront + balance only on successful delivery.
-        </p>
-        <p className="text-center text-blue-400/80 text-sm mb-12 flex items-center justify-center gap-2">
-          <Zap className="w-4 h-4" />
-          Each plan covers exactly <strong className="text-white">one project / one repository</strong>
-        </p>
+
+        {/* 🔥 Big Intro Offer Header */}
+        <div className="text-center mb-14">
+          <div className="inline-flex items-center gap-2 bg-gradient-to-r from-orange-500/25 to-red-500/25 border border-orange-500/50 text-orange-300 text-sm font-bold px-5 py-2 rounded-full mb-5 animate-pulse">
+            <Flame className="w-4 h-4 text-orange-400" />
+            🚨 ONE-TIME INTRODUCTORY OFFER — ACT NOW
+            <Flame className="w-4 h-4 text-orange-400" />
+          </div>
+          <h2 className="text-5xl font-extrabold text-center mb-3">
+            Rescue Plans
+          </h2>
+          <p className="text-2xl font-bold text-center mb-3">
+            <span className="bg-gradient-to-r from-orange-400 to-red-400 bg-clip-text text-transparent">
+              Flat fee. No balance. No surprises.
+            </span>
+          </p>
+          <p className="text-gray-400 text-center max-w-2xl mx-auto mb-4">
+            For our launch, we're offering the <strong className="text-white">full service</strong> at a single introductory price.
+            You pay once — we fix your project, deploy it live, and you're done. <strong className="text-white">No balance charge when we deliver.</strong>
+          </p>
+          <div className="inline-flex items-center gap-2 bg-red-500/10 border border-red-500/30 text-red-400 text-xs font-semibold px-4 py-2 rounded-lg">
+            <AlertTriangle className="w-3.5 h-3.5" />
+            These prices will not be offered again once this launch period ends
+          </div>
+        </div>
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 md:gap-8">
           {TIERS.map((tier) => (
             <div key={tier.key} className={`relative flex flex-col rounded-2xl p-7 transition-all duration-200 ${
-              tier.highlighted
+              tier.isBestDeal
+                ? "bg-gradient-to-b from-orange-500/20 via-red-500/10 to-white/5 border-2 border-orange-500/60 shadow-xl shadow-orange-500/15"
+                : tier.highlighted
                 ? "bg-gradient-to-b from-blue-500/20 to-white/5 border-2 border-blue-500/50 shadow-lg shadow-blue-500/10"
                 : "bg-white/5 border border-white/10 hover:border-white/20"
             }`}>
-              {tier.highlighted && (
+              {/* Badge */}
+              {tier.isBestDeal && (
+                <div className="absolute -top-4 left-1/2 -translate-x-1/2 flex flex-col items-center gap-1">
+                  <div className="bg-gradient-to-r from-orange-500 to-red-500 text-white text-xs font-black px-4 py-1.5 rounded-full shadow-lg whitespace-nowrap">
+                    🔥 BEST DEAL — SAVE {tier.savings}
+                  </div>
+                </div>
+              )}
+              {!tier.isBestDeal && tier.highlighted && (
                 <div className="absolute -top-3 left-1/2 -translate-x-1/2 bg-blue-500 text-black text-xs font-bold px-3 py-1 rounded-full">
                   MOST POPULAR
                 </div>
               )}
-              <h3 className="text-2xl font-bold mb-1">{tier.name}</h3>
-              <p className="text-gray-400 text-sm mb-6">{tier.tagline}</p>
-              <div className="mb-6">
-                <div className="flex items-baseline gap-2 mb-1">
-                  <span className="text-4xl font-extrabold">{tier.upfront}</span>
-                  <span className="text-gray-500">today</span>
+
+              <h3 className="text-2xl font-bold mb-1 mt-2">{tier.name}</h3>
+              <p className="text-gray-400 text-sm mb-5">{tier.tagline}</p>
+
+              {/* Price block */}
+              <div className="mb-5">
+                {/* Normal price struck through */}
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="text-gray-500 text-sm line-through">{tier.normalPrice} normally</span>
+                  <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${
+                    tier.isBestDeal ? "bg-orange-500/20 text-orange-400" : "bg-green-500/20 text-green-400"
+                  }`}>{tier.savings}</span>
                 </div>
+                {/* Intro price big */}
                 <div className="flex items-baseline gap-2 mb-1">
-                  <span className="text-lg font-bold text-blue-400">+{tier.balance}</span>
-                  <span className="text-gray-500 text-sm">on successful delivery</span>
+                  <span className={`text-5xl font-black ${
+                    tier.isBestDeal ? "text-orange-400" : "text-white"
+                  }`}>{tier.introPrice}</span>
+                  <span className="text-gray-400 text-sm font-medium">one-time</span>
                 </div>
-                <div className="text-gray-500 text-sm">Total if delivered: {tier.total}</div>
+                {/* No balance badge */}
+                <div className="inline-flex items-center gap-1.5 bg-green-500/15 border border-green-500/30 text-green-400 text-xs font-bold px-3 py-1 rounded-full mt-1">
+                  <Check className="w-3 h-3" />
+                  No balance due on delivery
+                </div>
               </div>
-              <ul className="space-y-3 mb-8 flex-1">
+
+              <ul className="space-y-2.5 mb-8 flex-1">
                 {tier.features.map((f, i) => (
-                  <li key={i} className="flex items-start gap-2 text-gray-300 text-sm">
-                    <Check className="w-4 h-4 text-blue-400 flex-shrink-0 mt-0.5" />
-                    {f}
+                  <li key={i} className={`flex items-start gap-2 text-sm ${
+                    f.startsWith("✦") ? "text-green-400 font-semibold" : "text-gray-300"
+                  }`}>
+                    <Check className={`w-4 h-4 flex-shrink-0 mt-0.5 ${
+                      tier.isBestDeal ? "text-orange-400" : "text-blue-400"
+                    }`} />
+                    {f.replace("✦ ", "")}
                   </li>
                 ))}
               </ul>
-              <Link to={`/signup?tier=${tier.key}`} className={`w-full py-3 rounded-xl font-bold text-center transition flex items-center justify-center gap-2 ${
-                tier.highlighted
+
+              <Link to={`/signup?tier=${tier.key}`} className={`w-full py-3.5 rounded-xl font-black text-center transition flex items-center justify-center gap-2 text-sm ${
+                tier.isBestDeal
+                  ? "bg-gradient-to-r from-orange-500 to-red-500 text-white hover:opacity-90 shadow-lg shadow-orange-500/30"
+                  : tier.highlighted
                   ? "bg-gradient-to-r from-blue-500 to-cyan-400 text-black hover:opacity-90"
                   : "bg-white/10 text-white hover:bg-white/20 border border-white/10"
               }`}>
                 {tier.cta} <ArrowRight className="w-4 h-4" />
               </Link>
+              <p className="text-center text-gray-600 text-xs mt-3">
+                Introductory price — one time only
+              </p>
             </div>
           ))}
+        </div>
+
+        {/* Bottom urgency note */}
+        <div className="mt-10 text-center">
+          <p className="text-gray-500 text-sm">
+            🔒 Secure checkout via Stripe &nbsp;·&nbsp; Each plan covers <strong className="text-gray-300">one project / one repository</strong> &nbsp;·&nbsp; Prices in USD
+          </p>
         </div>
       </section>
 
@@ -325,15 +395,16 @@ export default function LandingPage() {
 
       {/* Guarantee */}
       <section className="px-6 md:px-8 pb-12 max-w-4xl mx-auto">
-        <div className="bg-blue-900/25 border border-blue-500/30 rounded-2xl p-6">
+        <div className="bg-gradient-to-r from-blue-900/25 to-green-900/15 border border-blue-500/30 rounded-2xl p-6">
           <div className="flex items-start gap-4">
             <Shield className="w-6 h-6 text-blue-400 flex-shrink-0 mt-0.5" />
             <div>
-              <h4 className="text-blue-300 font-semibold mb-1">Our Risk-Free Guarantee</h4>
+              <h4 className="text-blue-300 font-semibold mb-2">Our Risk-Free Introductory Guarantee</h4>
               <p className="text-blue-200/70 text-sm leading-relaxed">
-                You pay an upfront fee today. The balance is only charged if our agent successfully delivers your code —
-                deployed and working within 7 days. If it's not fixed, you get your upfront fee refunded, no questions asked.
-                Every project is scoped to one repository. Additional projects each require their own rescue plan.
+                During our introductory launch period, you pay <strong className="text-white">one flat fee</strong> — that's it.
+                Our agent fixes your project and deploys it live within 7 days. <strong className="text-white">No balance is charged when we deliver.</strong>{" "}
+                If we can't fix it, you get a full refund. No questions asked. Every project is scoped to one repository —
+                additional projects each require their own rescue plan.
               </p>
             </div>
           </div>

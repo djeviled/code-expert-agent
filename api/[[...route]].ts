@@ -428,6 +428,7 @@ app.post("/api/stripe/checkout", async (c) => {
       payment_method_types: ["card"],
       line_items: [{ price: priceId, quantity: 1 }],
       mode: "payment",
+      allow_promotion_codes: true,   // ← customers can enter promo codes at checkout
       success_url: `${origin}/success?session_id={CHECKOUT_SESSION_ID}&tier=${tier}`,
       cancel_url: `${origin}/signup?tier=${tier || "tier1"}`,
       customer_email: userEmail,
@@ -1430,6 +1431,162 @@ app.get("/api/cron/deadline", async (c) => {
   }
 
   return c.json({ ok: true, timestamp: new Date().toISOString(), ...results });
+});
+
+// ────────────────────────────────────────────────────────────
+// ADMIN — GET /api/admin/promos
+// List all promo codes
+// ────────────────────────────────────────────────────────────
+app.get("/api/admin/promos", requireAdmin, async (c) => {
+  const supabase = supabaseAdmin();
+  const { data, error } = await supabase
+    .from("promo_codes")
+    .select("*")
+    .order("created_at", { ascending: false });
+  if (error) return c.json({ error: error.message }, 500);
+  return c.json({ promos: data || [] });
+});
+
+// ────────────────────────────────────────────────────────────
+// ADMIN — POST /api/admin/promos
+// Create a new promo code (Stripe + DB)
+// Body: { code, label, discount_type, discount_value, applies_to,
+//         max_redemptions?, expires_at? }
+// ────────────────────────────────────────────────────────────
+app.post("/api/admin/promos", requireAdmin, async (c) => {
+  try {
+    const {
+      code, label, discount_type, discount_value,
+      applies_to = "all", max_redemptions, expires_at,
+    } = await c.req.json();
+
+    if (!code || !discount_type || !discount_value) {
+      return c.json({ error: "code, discount_type, and discount_value are required" }, 400);
+    }
+    if (!["percent", "amount"].includes(discount_type)) {
+      return c.json({ error: "discount_type must be 'percent' or 'amount'" }, 400);
+    }
+    if (discount_type === "percent" && (discount_value < 1 || discount_value > 100)) {
+      return c.json({ error: "Percent discount must be 1–100" }, 400);
+    }
+
+    const stripe = getStripe();
+    const supabase = supabaseAdmin();
+
+    // Build Stripe coupon params
+    const couponParams: any = {
+      name: label || code,
+      ...(discount_type === "percent"
+        ? { percent_off: discount_value }
+        : { amount_off: discount_value, currency: "usd" }),
+      duration: "once",
+    };
+    if (max_redemptions) couponParams.max_redemptions = max_redemptions;
+    if (expires_at) couponParams.redeem_by = Math.floor(new Date(expires_at).getTime() / 1000);
+
+    // Create Stripe coupon
+    const coupon = await stripe.coupons.create(couponParams);
+
+    // Create Stripe promotion code (the code string customers enter)
+    const promoCodeParams: any = {
+      coupon: coupon.id,
+      code: code.toUpperCase(),
+    };
+    if (max_redemptions) promoCodeParams.max_redemptions = max_redemptions;
+    if (expires_at) promoCodeParams.expires_at = Math.floor(new Date(expires_at).getTime() / 1000);
+
+    const stripePromo = await stripe.promotionCodes.create(promoCodeParams);
+
+    // Save to DB
+    const { data, error } = await supabase.from("promo_codes").insert({
+      code: code.toUpperCase(),
+      label: label || null,
+      stripe_coupon_id: coupon.id,
+      stripe_promo_id: stripePromo.id,
+      discount_type,
+      discount_value,
+      applies_to,
+      max_redemptions: max_redemptions || null,
+      expires_at: expires_at || null,
+      active: true,
+    }).select().single();
+
+    if (error) {
+      // Rollback Stripe objects if DB insert fails
+      await stripe.promotionCodes.update(stripePromo.id, { active: false }).catch(() => {});
+      await stripe.coupons.del(coupon.id).catch(() => {});
+      return c.json({ error: error.message }, 500);
+    }
+
+    return c.json({ promo: data });
+  } catch (err: any) {
+    // Handle Stripe duplicate code error gracefully
+    if (err?.raw?.code === "resource_already_exists") {
+      return c.json({ error: "That promo code already exists in Stripe. Choose a different code." }, 409);
+    }
+    return c.json({ error: err.message || "Failed to create promo code" }, 500);
+  }
+});
+
+// ────────────────────────────────────────────────────────────
+// ADMIN — POST /api/admin/promos/:id/toggle
+// Activate or deactivate a promo code
+// ────────────────────────────────────────────────────────────
+app.post("/api/admin/promos/:id/toggle", requireAdmin, async (c) => {
+  const id = c.req.param("id");
+  const supabase = supabaseAdmin();
+  const stripe = getStripe();
+
+  const { data: promo } = await supabase.from("promo_codes").select("*").eq("id", id).single();
+  if (!promo) return c.json({ error: "Not found" }, 404);
+
+  const newActive = !promo.active;
+
+  try {
+    // Toggle in Stripe
+    if (promo.stripe_promo_id) {
+      await stripe.promotionCodes.update(promo.stripe_promo_id, { active: newActive });
+    }
+    // Toggle in DB
+    const { data, error } = await supabase
+      .from("promo_codes")
+      .update({ active: newActive })
+      .eq("id", id)
+      .select()
+      .single();
+    if (error) return c.json({ error: error.message }, 500);
+    return c.json({ promo: data });
+  } catch (err: any) {
+    return c.json({ error: err.message }, 500);
+  }
+});
+
+// ────────────────────────────────────────────────────────────
+// ADMIN — DELETE /api/admin/promos/:id
+// Permanently delete a promo code (archives in Stripe)
+// ────────────────────────────────────────────────────────────
+app.delete("/api/admin/promos/:id", requireAdmin, async (c) => {
+  const id = c.req.param("id");
+  const supabase = supabaseAdmin();
+  const stripe = getStripe();
+
+  const { data: promo } = await supabase.from("promo_codes").select("*").eq("id", id).single();
+  if (!promo) return c.json({ error: "Not found" }, 404);
+
+  try {
+    // Deactivate in Stripe (can't fully delete promotion codes, only deactivate)
+    if (promo.stripe_promo_id) {
+      await stripe.promotionCodes.update(promo.stripe_promo_id, { active: false }).catch(() => {});
+    }
+    if (promo.stripe_coupon_id) {
+      await stripe.coupons.del(promo.stripe_coupon_id).catch(() => {});
+    }
+    // Delete from DB
+    await supabase.from("promo_codes").delete().eq("id", id);
+    return c.json({ success: true });
+  } catch (err: any) {
+    return c.json({ error: err.message }, 500);
+  }
 });
 
 // ────────────────────────────────────────────────────────────

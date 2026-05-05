@@ -150,7 +150,30 @@ create table if not exists public.admin_notes (
 );
 
 -- ────────────────────────────────────────────────────────────
--- INDEXES
+-- PROMO CODES
+-- ────────────────────────────────────────────────────────────
+create table if not exists public.promo_codes (
+  id                  uuid primary key default uuid_generate_v4(),
+  code                text unique not null,
+  label               text,                         -- internal name/note
+  stripe_coupon_id    text,                         -- Stripe coupon ID
+  stripe_promo_id     text,                         -- Stripe promotion code ID
+  discount_type       text not null check (discount_type in ('percent', 'amount')),
+  discount_value      integer not null,             -- percent 0-100 OR cents
+  applies_to          text not null default 'all',  -- 'all' | 'tier1' | 'tier2' | 'bundle'
+  max_redemptions     integer,                      -- null = unlimited
+  times_redeemed      integer not null default 0,
+  expires_at          timestamptz,                  -- null = never expires
+  active              boolean not null default true,
+  created_at          timestamptz default now()
+);
+
+create index if not exists idx_promo_codes_code   on public.promo_codes(code);
+create index if not exists idx_promo_codes_active on public.promo_codes(active);
+
+alter table public.promo_codes enable row level security;
+-- Promos are admin-only; no user-facing RLS needed (service key bypasses RLS)
+
 -- ────────────────────────────────────────────────────────────
 create index if not exists idx_users_email              on public.users(email);
 create index if not exists idx_users_stripe_customer    on public.users(stripe_customer_id);

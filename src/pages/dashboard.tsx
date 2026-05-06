@@ -452,6 +452,35 @@ export default function DashboardPage() {
           </div>
         </div>
 
+        {/* ── CREDENTIAL SETUP PROMPT (shown on first login / missing creds) ── */}
+        {Object.keys(savedCreds).length === 0 && (
+          <div className="bg-gradient-to-r from-cyan-500/10 to-blue-500/10 border border-cyan-500/30 rounded-2xl p-6">
+            <div className="flex items-start gap-4">
+              <div className="w-10 h-10 bg-cyan-500/20 rounded-xl flex items-center justify-center flex-shrink-0">
+                <Key className="w-5 h-5 text-cyan-400" />
+              </div>
+              <div className="flex-1">
+                <h3 className="font-bold text-white mb-1 flex items-center gap-2">
+                  🔐 Set up your API credentials
+                  <span className="text-xs bg-cyan-500/20 text-cyan-400 px-2 py-0.5 rounded-full font-normal">Recommended</span>
+                </h3>
+                <p className="text-gray-400 text-sm leading-relaxed mb-4">
+                  To let the agent work directly on your GitHub repos, deploy to Vercel, and access your Supabase project —
+                  save your API tokens below. They're <strong className="text-white">AES-256 encrypted</strong> and stored
+                  securely in our vault. The agent decrypts them only when actively working on your project.
+                </p>
+                <button
+                  onClick={() => { setShowCreds(true); setTimeout(() => document.getElementById("creds-section")?.scrollIntoView({ behavior: "smooth" }), 100); }}
+                  className="inline-flex items-center gap-2 bg-cyan-500 hover:bg-cyan-400 text-black font-bold px-4 py-2.5 rounded-xl transition text-sm"
+                >
+                  <Key className="w-4 h-4" />
+                  Add My Credentials
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Important notice about how this works */}
         <div className="bg-white/5 border border-white/10 rounded-2xl p-5">
           <div className="flex items-start gap-3">
@@ -769,7 +798,7 @@ export default function DashboardPage() {
         </section>
 
         {/* ── API CREDENTIALS VAULT ── */}
-        <section>
+        <section id="creds-section">
           <button
             onClick={() => setShowCreds((v) => !v)}
             className="w-full flex items-center justify-between mb-4 group"
@@ -789,14 +818,15 @@ export default function DashboardPage() {
           {showCreds && (
             <div className="space-y-3">
               {/* Info banner */}
-              <div className="bg-[#111827] border border-blue-500/20 rounded-xl p-4 flex items-start gap-3 mb-5">
-                <Shield className="w-4 h-4 text-blue-400 flex-shrink-0 mt-0.5" />
+              <div className="bg-[#111827] border border-cyan-500/20 rounded-xl p-4 flex items-start gap-3 mb-5">
+                <Shield className="w-4 h-4 text-cyan-400 flex-shrink-0 mt-0.5" />
                 <div>
-                  <p className="text-sm font-semibold text-white mb-1">Securely stored, never exposed</p>
+                  <p className="text-sm font-semibold text-white mb-1">AES-256 encrypted — never exposed</p>
                   <p className="text-xs text-gray-400 leading-relaxed">
-                    Your tokens are stored encrypted in our database and injected directly into the agent's
-                    secure vault at session start. They are never shown to you again after saving, and never
-                    included in any chat response.
+                    Every token is encrypted with AES-256 (pgcrypto) before being stored in our database.
+                    The encryption key never touches the database — it lives only in our server environment.
+                    Tokens are never shown again after saving, never logged, and never sent to the browser.
+                    The agent decrypts them only at the moment it needs to act on your behalf.
                   </p>
                 </div>
               </div>

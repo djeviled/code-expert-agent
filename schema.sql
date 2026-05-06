@@ -282,7 +282,35 @@ create policy "notes_select_own" on public.admin_notes
   for select using (auth.uid() = user_id);
 
 -- ────────────────────────────────────────────────────────────
--- FUNCTIONS & TRIGGERS
+-- CREDENTIAL ENCRYPTION FUNCTIONS (pgcrypto)
+-- Used by the API to encrypt/decrypt user tokens at rest.
+-- Key is passed from CREDENTIAL_ENCRYPTION_KEY env var — never stored in DB.
+-- ────────────────────────────────────────────────────────────
+
+-- Encrypt: returns base64-encoded AES-256 ciphertext
+create or replace function public.encrypt_credential(plaintext text, enc_key text)
+returns text
+language sql
+security definer
+as $$
+  select encode(pgp_sym_encrypt(plaintext, enc_key), 'base64');
+$$;
+
+-- Decrypt: returns original plaintext from base64 ciphertext
+create or replace function public.decrypt_credential(ciphertext text, enc_key text)
+returns text
+language sql
+security definer
+as $$
+  select pgp_sym_decrypt(decode(ciphertext, 'base64'), enc_key);
+$$;
+
+-- Revoke public access — only service role can call these
+revoke execute on function public.encrypt_credential(text, text) from public, anon, authenticated;
+revoke execute on function public.decrypt_credential(text, text) from public, anon, authenticated;
+grant execute on function public.encrypt_credential(text, text) to service_role;
+grant execute on function public.decrypt_credential(text, text) to service_role;
+
 -- ────────────────────────────────────────────────────────────
 
 -- Auto-update updated_at

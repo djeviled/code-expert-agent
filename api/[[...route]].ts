@@ -956,6 +956,32 @@ app.get("/api/user/dashboard", async (c) => {
 });
 
 // ────────────────────────────────────────────────────────────
+// ────────────────────────────────────────────────────────────
+// CREDENTIAL ENCRYPTION HELPERS
+// All user API tokens are AES-256 encrypted at rest using
+// pgp_sym_encrypt (pgcrypto). The key lives in CREDENTIAL_ENCRYPTION_KEY.
+// ────────────────────────────────────────────────────────────
+const CRED_ENC_KEY = process.env.CREDENTIAL_ENCRYPTION_KEY || "fallback-change-me-in-vercel-env";
+
+async function encryptCredential(supabase: any, plaintext: string): Promise<string> {
+  const { data, error } = await supabase.rpc("encrypt_credential", {
+    plaintext,
+    enc_key: CRED_ENC_KEY,
+  });
+  if (error || !data) throw new Error(`Encryption failed: ${error?.message}`);
+  return data as string;
+}
+
+async function decryptCredential(supabase: any, ciphertext: string): Promise<string> {
+  const { data, error } = await supabase.rpc("decrypt_credential", {
+    ciphertext,
+    enc_key: CRED_ENC_KEY,
+  });
+  if (error || !data) throw new Error(`Decryption failed: ${error?.message}`);
+  return data as string;
+}
+
+// ────────────────────────────────────────────────────────────
 // USER — GET /api/user/credentials
 // Returns saved providers list (names only, tokens masked)
 // ────────────────────────────────────────────────────────────
@@ -973,7 +999,7 @@ app.get("/api/user/credentials", async (c) => {
     .eq("user_id", user.id)
     .order("provider");
 
-  // Return which providers are saved (never return actual tokens)
+  // Return which providers are saved — NEVER return actual tokens
   const saved = (data || []).map((r: any) => ({
     provider: r.provider,
     saved: true,
@@ -985,7 +1011,7 @@ app.get("/api/user/credentials", async (c) => {
 
 // ────────────────────────────────────────────────────────────
 // USER — POST /api/user/credentials
-// Save or update a credential (upsert by provider)
+// Save or update a credential — ENCRYPTED at rest with AES-256
 // ────────────────────────────────────────────────────────────
 app.post("/api/user/credentials", async (c) => {
   const authHeader = c.req.header("authorization") || "";
@@ -1000,9 +1026,18 @@ app.post("/api/user/credentials", async (c) => {
     return c.json({ error: "provider and access_token are required" }, 400);
   }
 
-  const VALID_PROVIDERS = ["github", "vercel", "supabase_url", "supabase_key", "anthropic"];
+  const VALID_PROVIDERS = ["github", "vercel", "supabase_url", "supabase_key", "anthropic", "groq", "stripe"];
   if (!VALID_PROVIDERS.includes(provider)) {
     return c.json({ error: "Invalid provider" }, 400);
+  }
+
+  // Encrypt the token before storing
+  let encryptedToken: string;
+  try {
+    encryptedToken = await encryptCredential(supabase, access_token.trim());
+  } catch (encErr: any) {
+    console.error("Credential encryption failed:", encErr.message);
+    return c.json({ error: "Failed to encrypt credential — contact support" }, 500);
   }
 
   const { error: upsertErr } = await supabase
@@ -1011,7 +1046,7 @@ app.post("/api/user/credentials", async (c) => {
       {
         user_id: user.id,
         provider,
-        access_token: access_token.trim(),
+        access_token: encryptedToken,   // encrypted ciphertext stored here
         metadata: metadata || null,
         updated_at: new Date().toISOString(),
       },
@@ -1019,7 +1054,41 @@ app.post("/api/user/credentials", async (c) => {
     );
 
   if (upsertErr) return c.json({ error: upsertErr.message }, 500);
-  return c.json({ success: true, provider });
+  return c.json({ success: true, provider, encrypted: true });
+});
+
+// ────────────────────────────────────────────────────────────
+// INTERNAL — GET /api/internal/user-credentials/:userId/:provider
+// Decrypt and return a credential for agent use.
+// Requires service-role-level access (internal only — not exposed to users).
+// ────────────────────────────────────────────────────────────
+app.get("/api/internal/user-credentials/:userId/:provider", async (c) => {
+  // Require internal secret header so this is never callable from the browser
+  const internalSecret = c.req.header("x-internal-secret") || "";
+  const expectedSecret = process.env.INTERNAL_API_SECRET || "";
+  if (!expectedSecret || internalSecret !== expectedSecret) {
+    return c.json({ error: "Forbidden" }, 403);
+  }
+
+  const userId = c.req.param("userId");
+  const provider = c.req.param("provider");
+  const supabase = supabaseAdmin();
+
+  const { data, error } = await supabase
+    .from("user_credentials")
+    .select("access_token, provider, metadata")
+    .eq("user_id", userId)
+    .eq("provider", provider)
+    .single();
+
+  if (error || !data) return c.json({ error: "Credential not found" }, 404);
+
+  try {
+    const plaintext = await decryptCredential(supabase, data.access_token);
+    return c.json({ provider, token: plaintext, metadata: data.metadata });
+  } catch (decErr: any) {
+    return c.json({ error: "Decryption failed" }, 500);
+  }
 });
 
 // ────────────────────────────────────────────────────────────

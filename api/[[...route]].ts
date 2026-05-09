@@ -1026,9 +1026,11 @@ app.post("/api/user/credentials", async (c) => {
     return c.json({ error: "provider and access_token are required" }, 400);
   }
 
-  const VALID_PROVIDERS = ["github", "vercel", "supabase_url", "supabase_key", "anthropic", "groq", "stripe"];
-  if (!VALID_PROVIDERS.includes(provider)) {
-    return c.json({ error: "Invalid provider" }, 400);
+  // Accept any provider name that is a valid identifier (letters, numbers, underscores, hyphens)
+  // This allows GitHub, Vercel, Supabase, Stripe, Railway, eBay, AWS, custom services — anything.
+  const PROVIDER_RE = /^[a-z0-9_-]{1,64}$/i;
+  if (!PROVIDER_RE.test(provider)) {
+    return c.json({ error: "provider must be 1-64 alphanumeric/underscore/hyphen characters" }, 400);
   }
 
   // Encrypt the token before storing

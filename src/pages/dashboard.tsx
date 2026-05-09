@@ -6,7 +6,8 @@ import {
   Activity, LogOut, RefreshCw, ExternalLink, Zap,
   Shield, Star, X, Loader, FileText, Key, Eye, EyeOff,
   Github, Globe, Database, Bot, ChevronDown, ChevronUp,
-  Copy, ArrowRight, Sparkles, Trash2,
+  Copy, ArrowRight, Sparkles, Trash2, ShoppingCart, Mail,
+  Cpu, Cloud, Package, PlusCircle, Settings,
 } from "lucide-react";
 
 interface Project {
@@ -125,59 +126,419 @@ const SAMPLE_PROMPTS = [
   },
 ];
 
-// ── API credential definitions ──
-const CREDENTIAL_DEFS = [
+// ─────────────────────────────────────────────────────────────
+// CREDENTIAL CATEGORIES — add new services here at any time.
+// Each category groups related providers. The backend accepts
+// ANY provider string, so new entries here work immediately.
+// ─────────────────────────────────────────────────────────────
+interface CredDef {
+  provider: string;
+  label: string;
+  icon: any;
+  color: string;
+  placeholder: string;
+  hint: string;
+  helpUrl: string;
+  helpLabel: string;
+}
+
+interface CredCategory {
+  id: string;
+  label: string;
+  icon: any;
+  color: string;
+  bgColor: string;
+  defs: CredDef[];
+}
+
+const CREDENTIAL_CATEGORIES: CredCategory[] = [
   {
-    provider: "github",
-    label: "GitHub Personal Access Token",
+    id: "code_deploy",
+    label: "Code & Deploy",
     icon: Github,
     color: "text-white",
-    placeholder: "ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
-    hint: "Needs: repo, workflow scopes",
-    helpUrl: "https://github.com/settings/tokens/new",
-    helpLabel: "Create on GitHub →",
+    bgColor: "bg-white/10",
+    defs: [
+      {
+        provider: "github",
+        label: "GitHub Personal Access Token",
+        icon: Github,
+        color: "text-white",
+        placeholder: "ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        hint: "Needs: repo, workflow scopes",
+        helpUrl: "https://github.com/settings/tokens/new",
+        helpLabel: "Create on GitHub →",
+      },
+      {
+        provider: "vercel",
+        label: "Vercel API Token",
+        icon: Globe,
+        color: "text-white",
+        placeholder: "xxxxxxxxxxxxxxxxxxxxxxxxxx",
+        hint: "Vercel → Account Settings → Tokens",
+        helpUrl: "https://vercel.com/account/tokens",
+        helpLabel: "Create on Vercel →",
+      },
+      {
+        provider: "railway",
+        label: "Railway API Token",
+        icon: Cloud,
+        color: "text-purple-400",
+        placeholder: "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
+        hint: "Railway → Account Settings → Tokens",
+        helpUrl: "https://railway.app/account/tokens",
+        helpLabel: "Create on Railway →",
+      },
+      {
+        provider: "netlify",
+        label: "Netlify Personal Access Token",
+        icon: Globe,
+        color: "text-teal-400",
+        placeholder: "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        hint: "Netlify → User Settings → Applications → Personal access tokens",
+        helpUrl: "https://app.netlify.com/user/applications#personal-access-tokens",
+        helpLabel: "Create on Netlify →",
+      },
+      {
+        provider: "cloudflare",
+        label: "Cloudflare API Token",
+        icon: Cloud,
+        color: "text-orange-400",
+        placeholder: "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        hint: "Cloudflare → My Profile → API Tokens",
+        helpUrl: "https://dash.cloudflare.com/profile/api-tokens",
+        helpLabel: "Create on Cloudflare →",
+      },
+    ],
   },
   {
-    provider: "vercel",
-    label: "Vercel API Token",
-    icon: Globe,
-    color: "text-white",
-    placeholder: "xxxxxxxxxxxxxxxxxxxxxxxxxx",
-    hint: "From: Vercel → Settings → Tokens",
-    helpUrl: "https://vercel.com/account/tokens",
-    helpLabel: "Create on Vercel →",
-  },
-  {
-    provider: "supabase_url",
-    label: "Supabase Project URL",
+    id: "database",
+    label: "Database & Backend",
     icon: Database,
     color: "text-emerald-400",
-    placeholder: "https://xxxxxxxxxxxxxxxxxxxx.supabase.co",
-    hint: "From: Supabase → Settings → API",
-    helpUrl: "https://supabase.com/dashboard",
-    helpLabel: "Find in Supabase →",
+    bgColor: "bg-emerald-500/10",
+    defs: [
+      {
+        provider: "supabase_url",
+        label: "Supabase Project URL",
+        icon: Database,
+        color: "text-emerald-400",
+        placeholder: "https://xxxxxxxxxxxxxxxxxxxx.supabase.co",
+        hint: "Supabase Dashboard → Settings → API → Project URL",
+        helpUrl: "https://supabase.com/dashboard",
+        helpLabel: "Find in Supabase →",
+      },
+      {
+        provider: "supabase_key",
+        label: "Supabase Service Role Key",
+        icon: Database,
+        color: "text-emerald-400",
+        placeholder: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+        hint: "Service role key (not anon key) — Settings → API",
+        helpUrl: "https://supabase.com/dashboard",
+        helpLabel: "Find in Supabase →",
+      },
+      {
+        provider: "planetscale",
+        label: "PlanetScale Database URL",
+        icon: Database,
+        color: "text-yellow-400",
+        placeholder: "mysql://user:pass@host/db?ssl=true",
+        hint: "PlanetScale → Your DB → Connect → Connection string",
+        helpUrl: "https://app.planetscale.com",
+        helpLabel: "Find on PlanetScale →",
+      },
+      {
+        provider: "mongodb",
+        label: "MongoDB Atlas Connection String",
+        icon: Database,
+        color: "text-green-400",
+        placeholder: "mongodb+srv://user:pass@cluster.mongodb.net/db",
+        hint: "Atlas → Database → Connect → Drivers",
+        helpUrl: "https://cloud.mongodb.com",
+        helpLabel: "Find on Atlas →",
+      },
+      {
+        provider: "redis_url",
+        label: "Redis / Upstash URL",
+        icon: Database,
+        color: "text-red-400",
+        placeholder: "rediss://default:xxxx@host:port",
+        hint: "Upstash Console → Database → REST API or Redis URL",
+        helpUrl: "https://console.upstash.com",
+        helpLabel: "Find on Upstash →",
+      },
+    ],
   },
   {
-    provider: "supabase_key",
-    label: "Supabase Service Role Key",
-    icon: Database,
-    color: "text-emerald-400",
-    placeholder: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
-    hint: "Service role key (not anon key)",
-    helpUrl: "https://supabase.com/dashboard",
-    helpLabel: "Find in Supabase →",
+    id: "payments",
+    label: "Payments & Commerce",
+    icon: CreditCard,
+    color: "text-blue-400",
+    bgColor: "bg-blue-500/10",
+    defs: [
+      {
+        provider: "stripe",
+        label: "Stripe Secret Key",
+        icon: CreditCard,
+        color: "text-blue-400",
+        placeholder: "sk_live_... (from Stripe Dashboard → Developers → API Keys)",
+        hint: "Stripe Dashboard → Developers → API Keys → Secret key",
+        helpUrl: "https://dashboard.stripe.com/apikeys",
+        helpLabel: "Get on Stripe →",
+      },
+      {
+        provider: "stripe_webhook",
+        label: "Stripe Webhook Secret",
+        icon: CreditCard,
+        color: "text-blue-400",
+        placeholder: "whsec_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        hint: "Stripe → Developers → Webhooks → Signing secret",
+        helpUrl: "https://dashboard.stripe.com/webhooks",
+        helpLabel: "Get on Stripe →",
+      },
+      {
+        provider: "paypal",
+        label: "PayPal Client Secret",
+        icon: CreditCard,
+        color: "text-blue-500",
+        placeholder: "ExxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxB",
+        hint: "PayPal Developer → Apps & Credentials → Live → Client Secret",
+        helpUrl: "https://developer.paypal.com/dashboard/applications/live",
+        helpLabel: "Get on PayPal →",
+      },
+      {
+        provider: "ebay",
+        label: "eBay App Client Secret",
+        icon: ShoppingCart,
+        color: "text-yellow-500",
+        placeholder: "App-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
+        hint: "eBay Developer → Application Keys → Client Secret",
+        helpUrl: "https://developer.ebay.com/my/keys",
+        helpLabel: "Get on eBay →",
+      },
+      {
+        provider: "shopify",
+        label: "Shopify Admin API Token",
+        icon: ShoppingCart,
+        color: "text-green-500",
+        placeholder: "shpat_xxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        hint: "Shopify Admin → Settings → Apps → Develop Apps",
+        helpUrl: "https://partners.shopify.com",
+        helpLabel: "Create on Shopify →",
+      },
+    ],
   },
   {
-    provider: "anthropic",
-    label: "Anthropic API Key",
+    id: "ai",
+    label: "AI & ML",
     icon: Bot,
     color: "text-orange-400",
-    placeholder: "sk-ant-api03-...",
-    hint: "Optional — uses shared key if not set",
-    helpUrl: "https://console.anthropic.com/settings/keys",
-    helpLabel: "Create on Anthropic →",
+    bgColor: "bg-orange-500/10",
+    defs: [
+      {
+        provider: "anthropic",
+        label: "Anthropic API Key",
+        icon: Bot,
+        color: "text-orange-400",
+        placeholder: "sk-ant-api03-...",
+        hint: "Optional — agent uses shared key if not set",
+        helpUrl: "https://console.anthropic.com/settings/keys",
+        helpLabel: "Create on Anthropic →",
+      },
+      {
+        provider: "openai",
+        label: "OpenAI API Key",
+        icon: Bot,
+        color: "text-green-400",
+        placeholder: "sk-proj-xxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        hint: "OpenAI Platform → API Keys",
+        helpUrl: "https://platform.openai.com/api-keys",
+        helpLabel: "Create on OpenAI →",
+      },
+      {
+        provider: "groq",
+        label: "Groq API Key",
+        icon: Cpu,
+        color: "text-yellow-400",
+        placeholder: "gsk_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        hint: "Groq Console → API Keys",
+        helpUrl: "https://console.groq.com/keys",
+        helpLabel: "Create on Groq →",
+      },
+      {
+        provider: "huggingface",
+        label: "Hugging Face API Token",
+        icon: Bot,
+        color: "text-yellow-500",
+        placeholder: "hf_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        hint: "HuggingFace → Settings → Access Tokens",
+        helpUrl: "https://huggingface.co/settings/tokens",
+        helpLabel: "Create on HuggingFace →",
+      },
+      {
+        provider: "replicate",
+        label: "Replicate API Token",
+        icon: Cpu,
+        color: "text-purple-400",
+        placeholder: "r8_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        hint: "Replicate → Account Settings → API tokens",
+        helpUrl: "https://replicate.com/account/api-tokens",
+        helpLabel: "Create on Replicate →",
+      },
+    ],
+  },
+  {
+    id: "email_comms",
+    label: "Email & Messaging",
+    icon: Mail,
+    color: "text-pink-400",
+    bgColor: "bg-pink-500/10",
+    defs: [
+      {
+        provider: "sendgrid",
+        label: "SendGrid API Key",
+        icon: Mail,
+        color: "text-blue-400",
+        placeholder: "SG.xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        hint: "SendGrid → Settings → API Keys",
+        helpUrl: "https://app.sendgrid.com/settings/api_keys",
+        helpLabel: "Create on SendGrid →",
+      },
+      {
+        provider: "resend",
+        label: "Resend API Key",
+        icon: Mail,
+        color: "text-white",
+        placeholder: "re_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        hint: "Resend → API Keys",
+        helpUrl: "https://resend.com/api-keys",
+        helpLabel: "Create on Resend →",
+      },
+      {
+        provider: "twilio",
+        label: "Twilio Auth Token",
+        icon: Mail,
+        color: "text-red-400",
+        placeholder: "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        hint: "Twilio Console → Account Info → Auth Token",
+        helpUrl: "https://console.twilio.com",
+        helpLabel: "Get on Twilio →",
+      },
+      {
+        provider: "mailgun",
+        label: "Mailgun API Key",
+        icon: Mail,
+        color: "text-orange-400",
+        placeholder: "key-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        hint: "Mailgun → Settings → API Keys",
+        helpUrl: "https://app.mailgun.com/settings/api_security",
+        helpLabel: "Get on Mailgun →",
+      },
+    ],
+  },
+  {
+    id: "cloud",
+    label: "Cloud Infrastructure",
+    icon: Cloud,
+    color: "text-sky-400",
+    bgColor: "bg-sky-500/10",
+    defs: [
+      {
+        provider: "aws_access_key",
+        label: "AWS Access Key ID",
+        icon: Cloud,
+        color: "text-yellow-400",
+        placeholder: "AKIAIOSFODNN7EXAMPLE",
+        hint: "AWS Console → IAM → Security Credentials",
+        helpUrl: "https://console.aws.amazon.com/iam/home#/security_credentials",
+        helpLabel: "Get on AWS →",
+      },
+      {
+        provider: "aws_secret_key",
+        label: "AWS Secret Access Key",
+        icon: Cloud,
+        color: "text-yellow-400",
+        placeholder: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+        hint: "Store alongside AWS Access Key ID above",
+        helpUrl: "https://console.aws.amazon.com/iam/home#/security_credentials",
+        helpLabel: "Get on AWS →",
+      },
+      {
+        provider: "gcp_key",
+        label: "Google Cloud Service Account Key (JSON)",
+        icon: Cloud,
+        color: "text-blue-400",
+        placeholder: '{"type":"service_account","project_id":"..."}',
+        hint: "GCP → IAM → Service Accounts → Keys → Add Key → JSON",
+        helpUrl: "https://console.cloud.google.com/iam-admin/serviceaccounts",
+        helpLabel: "Create on GCP →",
+      },
+      {
+        provider: "do_token",
+        label: "DigitalOcean Personal Access Token",
+        icon: Cloud,
+        color: "text-blue-500",
+        placeholder: "dop_v1_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        hint: "DO Console → API → Tokens → Generate New Token",
+        helpUrl: "https://cloud.digitalocean.com/account/api/tokens",
+        helpLabel: "Create on DO →",
+      },
+    ],
+  },
+  {
+    id: "other",
+    label: "Other Packages & Services",
+    icon: Package,
+    color: "text-gray-400",
+    bgColor: "bg-white/5",
+    defs: [
+      {
+        provider: "npm_token",
+        label: "npm Access Token",
+        icon: Package,
+        color: "text-red-400",
+        placeholder: "npm_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        hint: "npm → Account → Access Tokens → Generate New Token",
+        helpUrl: "https://www.npmjs.com/settings/~/tokens",
+        helpLabel: "Create on npm →",
+      },
+      {
+        provider: "docker_token",
+        label: "Docker Hub Access Token",
+        icon: Package,
+        color: "text-blue-400",
+        placeholder: "dckr_pat_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        hint: "Docker Hub → Account Settings → Security → New Access Token",
+        helpUrl: "https://hub.docker.com/settings/security",
+        helpLabel: "Create on Docker Hub →",
+      },
+      {
+        provider: "slack_webhook",
+        label: "Slack Webhook URL",
+        icon: Mail,
+        color: "text-green-400",
+        placeholder: "https://hooks.slack.com/services/WORKSPACE/CHANNEL/TOKEN",
+        hint: "Slack → Apps → Incoming Webhooks",
+        helpUrl: "https://api.slack.com/messaging/webhooks",
+        helpLabel: "Create on Slack →",
+      },
+      {
+        provider: "discord_webhook",
+        label: "Discord Webhook URL",
+        icon: Mail,
+        color: "text-indigo-400",
+        placeholder: "https://discord.com/api/webhooks/xxxx/xxxx",
+        hint: "Discord → Channel Settings → Integrations → Webhooks",
+        helpUrl: "https://discord.com/developers/docs/resources/webhook",
+        helpLabel: "Discord docs →",
+      },
+    ],
   },
 ];
+
+// Flat list used for the "saved count" display and internal lookups
+const ALL_CREDENTIAL_DEFS: CredDef[] = CREDENTIAL_CATEGORIES.flatMap((c) => c.defs);
 
 const STATUS_CONFIG: Record<string, { label: string; color: string; icon: any; desc: string }> = {
   pending:          { label: "Awaiting Start",           color: "text-yellow-400 bg-yellow-500/15 border-yellow-500/30",  icon: Clock,       desc: "Your project is queued. We'll start work shortly." },
@@ -193,7 +554,296 @@ const TIER_LABELS: Record<string, string> = {
   BUNDLE: "Bundle Rescue",
 };
 
-export default function DashboardPage() {
+// ─────────────────────────────────────────────────────────────
+// CredentialRow — shared single-credential input/display row
+// ─────────────────────────────────────────────────────────────
+function CredentialRow({
+  def, savedCreds, credValues, credVisible, credSaving, credDeleting,
+  setCredValues, setCredVisible, handleSaveCredential, handleDeleteCredential,
+}: {
+  def: CredDef;
+  savedCreds: Record<string, SavedCredential>;
+  credValues: Record<string, string>;
+  credVisible: Record<string, boolean>;
+  credSaving: Record<string, boolean>;
+  credDeleting: Record<string, boolean>;
+  setCredValues: React.Dispatch<React.SetStateAction<Record<string, string>>>;
+  setCredVisible: React.Dispatch<React.SetStateAction<Record<string, boolean>>>;
+  handleSaveCredential: (p: string) => void;
+  handleDeleteCredential: (p: string) => void;
+}) {
+  const Icon = def.icon;
+  const isSaved = !!savedCreds[def.provider];
+  const saving = credSaving[def.provider];
+  const deleting = credDeleting[def.provider];
+  const value = credValues[def.provider] || "";
+  const visible = credVisible[def.provider];
+
+  return (
+    <div className="bg-white/5 border border-white/10 rounded-xl p-4">
+      <div className="flex items-center justify-between mb-2">
+        <div className="flex items-center gap-2">
+          <Icon className={`w-4 h-4 ${def.color}`} />
+          <span className="text-sm font-semibold text-white">{def.label}</span>
+          {isSaved && (
+            <span className="flex items-center gap-1 text-xs text-green-400 bg-green-500/15 border border-green-500/20 px-2 py-0.5 rounded-full">
+              <CheckCircle className="w-3 h-3" /> Saved
+            </span>
+          )}
+        </div>
+        <div className="flex items-center gap-2">
+          <a href={def.helpUrl} target="_blank" rel="noopener noreferrer"
+            className="text-xs text-blue-400 hover:text-blue-300 transition hidden sm:block">
+            {def.helpLabel}
+          </a>
+          {isSaved && (
+            <button onClick={() => handleDeleteCredential(def.provider)} disabled={deleting}
+              className="p-1 text-gray-500 hover:text-red-400 transition" title="Remove">
+              {deleting ? <Loader className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
+            </button>
+          )}
+        </div>
+      </div>
+      <p className="text-xs text-gray-500 mb-3">{def.hint}</p>
+      {isSaved ? (
+        <div className="flex items-center gap-3 bg-green-500/5 border border-green-500/20 rounded-lg px-4 py-2.5">
+          <CheckCircle className="w-4 h-4 text-green-400 flex-shrink-0" />
+          <p className="text-xs text-green-400">
+            Saved on {new Date(savedCreds[def.provider].updated_at).toLocaleDateString()} · encrypted at rest
+          </p>
+        </div>
+      ) : (
+        <div className="flex gap-2">
+          <div className="relative flex-1">
+            <input
+              type={visible ? "text" : "password"}
+              value={value}
+              onChange={(e) => setCredValues((s) => ({ ...s, [def.provider]: e.target.value }))}
+              placeholder={def.placeholder}
+              className="w-full bg-white/5 border border-white/10 rounded-lg px-4 py-2.5 text-white placeholder-gray-600 focus:outline-none focus:border-blue-500/50 text-sm pr-10 font-mono"
+              onKeyDown={(e) => { if (e.key === "Enter") handleSaveCredential(def.provider); }}
+            />
+            <button type="button"
+              onClick={() => setCredVisible((s) => ({ ...s, [def.provider]: !visible }))}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-white">
+              {visible ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+            </button>
+          </div>
+          <button onClick={() => handleSaveCredential(def.provider)}
+            disabled={!value.trim() || saving}
+            className="bg-gradient-to-r from-blue-500 to-cyan-400 text-black font-bold px-5 py-2.5 rounded-lg hover:opacity-90 transition disabled:opacity-40 text-sm flex items-center gap-2">
+            {saving ? <Loader className="w-3.5 h-3.5 animate-spin" /> : "Save"}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// CredentialCategory — collapsible category block
+// ─────────────────────────────────────────────────────────────
+function CredentialCategory({
+  cat, savedInCat, savedCreds, credValues, credVisible, credSaving, credDeleting,
+  setCredValues, setCredVisible, handleSaveCredential, handleDeleteCredential,
+}: {
+  cat: CredCategory; savedInCat: number;
+  savedCreds: Record<string, SavedCredential>;
+  credValues: Record<string, string>;
+  credVisible: Record<string, boolean>;
+  credSaving: Record<string, boolean>;
+  credDeleting: Record<string, boolean>;
+  setCredValues: React.Dispatch<React.SetStateAction<Record<string, string>>>;
+  setCredVisible: React.Dispatch<React.SetStateAction<Record<string, boolean>>>;
+  handleSaveCredential: (p: string) => void;
+  handleDeleteCredential: (p: string) => void;
+}) {
+  const [open, setOpen] = useState(savedInCat > 0);
+  const CatIcon = cat.icon;
+
+  return (
+    <div className={`border rounded-2xl overflow-hidden ${savedInCat > 0 ? "border-white/20" : "border-white/8"}`}>
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="w-full flex items-center justify-between px-5 py-4 bg-white/3 hover:bg-white/5 transition group"
+      >
+        <div className="flex items-center gap-3">
+          <div className={`w-8 h-8 rounded-lg ${cat.bgColor} flex items-center justify-center`}>
+            <CatIcon className={`w-4 h-4 ${cat.color}`} />
+          </div>
+          <div className="text-left">
+            <span className="text-sm font-semibold text-white">{cat.label}</span>
+            <span className="text-xs text-gray-500 ml-2">
+              {savedInCat > 0 ? `${savedInCat}/${cat.defs.length} saved` : `${cat.defs.length} services`}
+            </span>
+          </div>
+          {savedInCat > 0 && (
+            <span className="text-xs text-green-400 bg-green-500/15 border border-green-500/20 px-2 py-0.5 rounded-full">
+              ✓ {savedInCat} active
+            </span>
+          )}
+        </div>
+        {open
+          ? <ChevronUp className="w-4 h-4 text-gray-500 group-hover:text-white transition" />
+          : <ChevronDown className="w-4 h-4 text-gray-500 group-hover:text-white transition" />}
+      </button>
+
+      {open && (
+        <div className="p-4 space-y-3 bg-black/20">
+          {cat.defs.map((def) => (
+            <CredentialRow
+              key={def.provider}
+              def={def}
+              savedCreds={savedCreds}
+              credValues={credValues}
+              credVisible={credVisible}
+              credSaving={credSaving}
+              credDeleting={credDeleting}
+              setCredValues={setCredValues}
+              setCredVisible={setCredVisible}
+              handleSaveCredential={handleSaveCredential}
+              handleDeleteCredential={handleDeleteCredential}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// CustomCredentialEntry — add any service not in the list above
+// ─────────────────────────────────────────────────────────────
+function CustomCredentialEntry({
+  savedCreds, credValues, credVisible, credSaving, credDeleting,
+  setCredValues, setCredVisible, handleSaveCredential, handleDeleteCredential,
+}: {
+  savedCreds: Record<string, SavedCredential>;
+  credValues: Record<string, string>;
+  credVisible: Record<string, boolean>;
+  credSaving: Record<string, boolean>;
+  credDeleting: Record<string, boolean>;
+  setCredValues: React.Dispatch<React.SetStateAction<Record<string, string>>>;
+  setCredVisible: React.Dispatch<React.SetStateAction<Record<string, boolean>>>;
+  handleSaveCredential: (p: string) => void;
+  handleDeleteCredential: (p: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [customName, setCustomName] = useState("");
+  const [customValue, setCustomValue] = useState("");
+  const [customVisible, setCustomVisible] = useState(false);
+
+  // Find any saved creds that are NOT in the known category list
+  const knownProviders = new Set(ALL_CREDENTIAL_DEFS.map((d) => d.provider));
+  const customSaved = Object.keys(savedCreds).filter((p) => !knownProviders.has(p));
+
+  const sanitize = (s: string) =>
+    s.toLowerCase().trim().replace(/[^a-z0-9_]/g, "_").replace(/_+/g, "_").slice(0, 64);
+
+  const handleAddCustom = () => {
+    const key = sanitize(customName);
+    if (!key || !customValue.trim()) return;
+    setCredValues((s) => ({ ...s, [key]: customValue }));
+    handleSaveCredential(key);
+    setCustomName("");
+    setCustomValue("");
+  };
+
+  return (
+    <div className="border border-dashed border-white/20 rounded-2xl overflow-hidden">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="w-full flex items-center justify-between px-5 py-4 hover:bg-white/3 transition group"
+      >
+        <div className="flex items-center gap-3">
+          <div className="w-8 h-8 rounded-lg bg-white/5 flex items-center justify-center">
+            <PlusCircle className="w-4 h-4 text-gray-400" />
+          </div>
+          <div className="text-left">
+            <span className="text-sm font-semibold text-white">Custom / Any Other Service</span>
+            <span className="text-xs text-gray-500 ml-2">
+              Railway, AWS, eBay, Twilio, or anything else
+              {customSaved.length > 0 ? ` · ${customSaved.length} custom saved` : ""}
+            </span>
+          </div>
+        </div>
+        {open
+          ? <ChevronUp className="w-4 h-4 text-gray-500 group-hover:text-white transition" />
+          : <ChevronDown className="w-4 h-4 text-gray-500 group-hover:text-white transition" />}
+      </button>
+
+      {open && (
+        <div className="p-4 space-y-3 bg-black/20">
+          {/* Existing custom saved creds */}
+          {customSaved.map((provider) => (
+            <div key={provider} className="bg-white/5 border border-white/10 rounded-xl p-4 flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <Settings className="w-4 h-4 text-gray-400" />
+                <span className="text-sm font-mono text-white">{provider}</span>
+                <span className="flex items-center gap-1 text-xs text-green-400 bg-green-500/15 border border-green-500/20 px-2 py-0.5 rounded-full">
+                  <CheckCircle className="w-3 h-3" /> Saved
+                </span>
+              </div>
+              <button onClick={() => handleDeleteCredential(provider)}
+                disabled={credDeleting[provider]}
+                className="p-1 text-gray-500 hover:text-red-400 transition">
+                {credDeleting[provider] ? <Loader className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
+              </button>
+            </div>
+          ))}
+
+          {/* Add new custom credential */}
+          <div className="bg-white/5 border border-white/10 rounded-xl p-4 space-y-3">
+            <p className="text-xs text-gray-400">
+              Enter a <strong className="text-white">service name</strong> (e.g. <code className="bg-black/30 px-1 rounded">railway</code>, <code className="bg-black/30 px-1 rounded">ebay_secret</code>, <code className="bg-black/30 px-1 rounded">aws_access_key</code>) and the token value.
+              The agent will automatically use it when working with that service.
+            </p>
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={customName}
+                onChange={(e) => setCustomName(e.target.value)}
+                placeholder="service_name  (e.g. railway, ebay_secret)"
+                className="flex-1 bg-white/5 border border-white/10 rounded-lg px-4 py-2.5 text-white placeholder-gray-600 focus:outline-none focus:border-cyan-500/50 text-sm font-mono"
+              />
+            </div>
+            <div className="flex gap-2">
+              <div className="relative flex-1">
+                <input
+                  type={customVisible ? "text" : "password"}
+                  value={customValue}
+                  onChange={(e) => setCustomValue(e.target.value)}
+                  placeholder="Token / API key value"
+                  className="w-full bg-white/5 border border-white/10 rounded-lg px-4 py-2.5 text-white placeholder-gray-600 focus:outline-none focus:border-cyan-500/50 text-sm pr-10 font-mono"
+                  onKeyDown={(e) => { if (e.key === "Enter") handleAddCustom(); }}
+                />
+                <button type="button"
+                  onClick={() => setCustomVisible((v) => !v)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-white">
+                  {customVisible ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
+              </div>
+              <button
+                onClick={handleAddCustom}
+                disabled={!customName.trim() || !customValue.trim() || credSaving[sanitize(customName)]}
+                className="bg-gradient-to-r from-blue-500 to-cyan-400 text-black font-bold px-5 py-2.5 rounded-lg hover:opacity-90 transition disabled:opacity-40 text-sm flex items-center gap-2"
+              >
+                {credSaving[sanitize(customName)] ? <Loader className="w-3.5 h-3.5 animate-spin" /> : <><PlusCircle className="w-3.5 h-3.5" /> Save</>}
+              </button>
+            </div>
+            {customName && (
+              <p className="text-xs text-gray-500">
+                Will be saved as key: <code className="text-cyan-400 bg-black/30 px-1.5 py-0.5 rounded">{sanitize(customName)}</code>
+              </p>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+
   const { user, token, logout } = useAuth();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -872,9 +1522,9 @@ export default function DashboardPage() {
           >
             <h2 className="text-lg font-bold flex items-center gap-2">
               <Key className="w-5 h-5 text-cyan-400" />
-              API Credentials
+              API Credentials Vault
               <span className="text-xs font-normal text-gray-500 ml-1">
-                — {Object.keys(savedCreds).length} of {CREDENTIAL_DEFS.length} saved
+                — {Object.keys(savedCreds).length} saved · {CREDENTIAL_CATEGORIES.length} categories · any service supported
               </span>
             </h2>
             {showCreds
@@ -883,106 +1533,54 @@ export default function DashboardPage() {
           </button>
 
           {showCreds && (
-            <div className="space-y-3">
-              {/* Info banner */}
-              <div className="bg-[#111827] border border-cyan-500/20 rounded-xl p-4 flex items-start gap-3 mb-5">
+            <div className="space-y-6">
+              {/* Security banner */}
+              <div className="bg-[#111827] border border-cyan-500/20 rounded-xl p-4 flex items-start gap-3">
                 <Shield className="w-4 h-4 text-cyan-400 flex-shrink-0 mt-0.5" />
                 <div>
-                  <p className="text-sm font-semibold text-white mb-1">AES-256 encrypted — never exposed</p>
+                  <p className="text-sm font-semibold text-white mb-1">AES-256 encrypted · per-user isolation · never exposed</p>
                   <p className="text-xs text-gray-400 leading-relaxed">
-                    Every token is encrypted with AES-256 (pgcrypto) before being stored in our database.
-                    The encryption key never touches the database — it lives only in our server environment.
-                    Tokens are never shown again after saving, never logged, and never sent to the browser.
-                    The agent decrypts them only at the moment it needs to act on your behalf.
+                    Every token is encrypted with AES-256 (pgcrypto) before storage. The key lives only in the server environment —
+                    never in the database. Tokens are never shown after saving, never logged, and never sent to the browser.
+                    The agent decrypts only at the moment it acts on your behalf. Each user's vault is completely isolated.
                   </p>
                 </div>
               </div>
 
-              {CREDENTIAL_DEFS.map((def) => {
-                const Icon = def.icon;
-                const isSaved = !!savedCreds[def.provider];
-                const saving = credSaving[def.provider];
-                const deleting = credDeleting[def.provider];
-                const value = credValues[def.provider] || "";
-                const visible = credVisible[def.provider];
-
+              {/* Render each category as a collapsible group */}
+              {CREDENTIAL_CATEGORIES.map((cat) => {
+                const CatIcon = cat.icon;
+                const savedInCat = cat.defs.filter((d) => !!savedCreds[d.provider]).length;
                 return (
-                  <div key={def.provider} className="bg-white/5 border border-white/10 rounded-xl p-5">
-                    <div className="flex items-center justify-between mb-3">
-                      <div className="flex items-center gap-2">
-                        <Icon className={`w-4 h-4 ${def.color}`} />
-                        <span className="text-sm font-semibold text-white">{def.label}</span>
-                        {isSaved && (
-                          <span className="flex items-center gap-1 text-xs text-green-400 bg-green-500/15 border border-green-500/20 px-2 py-0.5 rounded-full">
-                            <CheckCircle className="w-3 h-3" /> Saved
-                          </span>
-                        )}
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <a
-                          href={def.helpUrl}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="text-xs text-blue-400 hover:text-blue-300 transition"
-                        >
-                          {def.helpLabel}
-                        </a>
-                        {isSaved && (
-                          <button
-                            onClick={() => handleDeleteCredential(def.provider)}
-                            disabled={deleting}
-                            className="p-1 text-gray-500 hover:text-red-400 transition"
-                            title="Remove credential"
-                          >
-                            {deleting
-                              ? <Loader className="w-3.5 h-3.5 animate-spin" />
-                              : <Trash2 className="w-3.5 h-3.5" />}
-                          </button>
-                        )}
-                      </div>
-                    </div>
-
-                    <p className="text-xs text-gray-500 mb-3">{def.hint}</p>
-
-                    {isSaved ? (
-                      <div className="flex items-center gap-3 bg-green-500/5 border border-green-500/20 rounded-lg px-4 py-3">
-                        <CheckCircle className="w-4 h-4 text-green-400 flex-shrink-0" />
-                        <p className="text-xs text-green-400">
-                          Token saved on {new Date(savedCreds[def.provider].updated_at).toLocaleDateString()}.
-                          Click the trash icon to replace it.
-                        </p>
-                      </div>
-                    ) : (
-                      <div className="flex gap-2">
-                        <div className="relative flex-1">
-                          <input
-                            type={visible ? "text" : "password"}
-                            value={value}
-                            onChange={(e) => setCredValues((s) => ({ ...s, [def.provider]: e.target.value }))}
-                            placeholder={def.placeholder}
-                            className="w-full bg-white/5 border border-white/10 rounded-lg px-4 py-2.5 text-white placeholder-gray-600 focus:outline-none focus:border-blue-500/50 text-sm pr-10 font-mono"
-                            onKeyDown={(e) => { if (e.key === "Enter") handleSaveCredential(def.provider); }}
-                          />
-                          <button
-                            type="button"
-                            onClick={() => setCredVisible((s) => ({ ...s, [def.provider]: !visible }))}
-                            className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-white"
-                          >
-                            {visible ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                          </button>
-                        </div>
-                        <button
-                          onClick={() => handleSaveCredential(def.provider)}
-                          disabled={!value.trim() || saving}
-                          className="bg-gradient-to-r from-blue-500 to-cyan-400 text-black font-bold px-5 py-2.5 rounded-lg hover:opacity-90 transition disabled:opacity-40 text-sm flex items-center gap-2"
-                        >
-                          {saving ? <Loader className="w-3.5 h-3.5 animate-spin" /> : "Save"}
-                        </button>
-                      </div>
-                    )}
-                  </div>
+                  <CredentialCategory
+                    key={cat.id}
+                    cat={cat}
+                    savedInCat={savedInCat}
+                    savedCreds={savedCreds}
+                    credValues={credValues}
+                    credVisible={credVisible}
+                    credSaving={credSaving}
+                    credDeleting={credDeleting}
+                    setCredValues={setCredValues}
+                    setCredVisible={setCredVisible}
+                    handleSaveCredential={handleSaveCredential}
+                    handleDeleteCredential={handleDeleteCredential}
+                  />
                 );
               })}
+
+              {/* ── CUSTOM / ANY SERVICE ── */}
+              <CustomCredentialEntry
+                savedCreds={savedCreds}
+                credValues={credValues}
+                credVisible={credVisible}
+                credSaving={credSaving}
+                credDeleting={credDeleting}
+                setCredValues={setCredValues}
+                setCredVisible={setCredVisible}
+                handleSaveCredential={handleSaveCredential}
+                handleDeleteCredential={handleDeleteCredential}
+              />
             </div>
           )}
         </section>

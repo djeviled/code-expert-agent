@@ -251,6 +251,7 @@ export default function DashboardPage() {
   }, []);
 
   // Load saved credentials (names only — no token values returned)
+  // Auto-expand the credentials section if no credentials are saved yet
   useEffect(() => {
     if (!token) return;
     fetch("/api/user/credentials", { headers: { Authorization: `Bearer ${token}` } })
@@ -260,6 +261,10 @@ export default function DashboardPage() {
           const map: Record<string, SavedCredential> = {};
           credentials.forEach((c: SavedCredential) => { map[c.provider] = c; });
           setSavedCreds(map);
+          // Auto-expand credentials panel on first login if none are saved yet
+          if (credentials.length === 0) {
+            setShowCreds(true);
+          }
         }
       })
       .catch(() => {});
@@ -460,28 +465,49 @@ export default function DashboardPage() {
 
         {/* ── CREDENTIAL SETUP PROMPT (shown on first login / missing creds) ── */}
         {Object.keys(savedCreds).length === 0 && (
-          <div className="bg-gradient-to-r from-cyan-500/10 to-blue-500/10 border border-cyan-500/30 rounded-2xl p-6">
+          <div className={`rounded-2xl p-6 border ${isPaidUser
+            ? "bg-gradient-to-r from-yellow-500/10 to-orange-500/10 border-yellow-500/40"
+            : "bg-gradient-to-r from-cyan-500/10 to-blue-500/10 border-cyan-500/30"
+          }`}>
             <div className="flex items-start gap-4">
-              <div className="w-10 h-10 bg-cyan-500/20 rounded-xl flex items-center justify-center flex-shrink-0">
-                <Key className="w-5 h-5 text-cyan-400" />
+              <div className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 ${isPaidUser ? "bg-yellow-500/20" : "bg-cyan-500/20"}`}>
+                <Key className={`w-5 h-5 ${isPaidUser ? "text-yellow-400" : "text-cyan-400"}`} />
               </div>
               <div className="flex-1">
                 <h3 className="font-bold text-white mb-1 flex items-center gap-2">
-                  🔐 Set up your API credentials
-                  <span className="text-xs bg-cyan-500/20 text-cyan-400 px-2 py-0.5 rounded-full font-normal">Recommended</span>
+                  {isPaidUser ? "⚡ Connect your accounts to get started" : "🔐 Set up your API credentials"}
+                  <span className={`text-xs px-2 py-0.5 rounded-full font-normal ${isPaidUser
+                    ? "bg-yellow-500/20 text-yellow-400"
+                    : "bg-cyan-500/20 text-cyan-400"
+                  }`}>
+                    {isPaidUser ? "Required" : "Recommended"}
+                  </span>
                 </h3>
-                <p className="text-gray-400 text-sm leading-relaxed mb-4">
-                  To let the agent work directly on your GitHub repos, deploy to Vercel, and access your Supabase project —
-                  save your API tokens below. They're <strong className="text-white">AES-256 encrypted</strong> and stored
-                  securely in our vault. The agent decrypts them only when actively working on your project.
+                <p className="text-gray-400 text-sm leading-relaxed mb-1">
+                  The agent needs your API tokens to work on <strong className="text-white">your</strong> GitHub repos,
+                  deploy to <strong className="text-white">your</strong> Vercel account, and access <strong className="text-white">your</strong> Supabase project.
                 </p>
-                <button
-                  onClick={() => { setShowCreds(true); setTimeout(() => document.getElementById("creds-section")?.scrollIntoView({ behavior: "smooth" }), 100); }}
-                  className="inline-flex items-center gap-2 bg-cyan-500 hover:bg-cyan-400 text-black font-bold px-4 py-2.5 rounded-xl transition text-sm"
-                >
-                  <Key className="w-4 h-4" />
-                  Add My Credentials
-                </button>
+                <p className="text-gray-500 text-xs mb-4">
+                  Every token is <strong className="text-white">AES-256 encrypted</strong> before being stored — isolated to your account,
+                  never shared, never logged. The agent decrypts them only at the moment it acts on your behalf.
+                </p>
+                <div className="flex flex-wrap gap-3">
+                  <button
+                    onClick={() => { setShowCreds(true); setTimeout(() => document.getElementById("creds-section")?.scrollIntoView({ behavior: "smooth" }), 100); }}
+                    className={`inline-flex items-center gap-2 font-bold px-4 py-2.5 rounded-xl transition text-sm ${isPaidUser
+                      ? "bg-yellow-500 hover:bg-yellow-400 text-black"
+                      : "bg-cyan-500 hover:bg-cyan-400 text-black"
+                    }`}
+                  >
+                    <Key className="w-4 h-4" />
+                    {isPaidUser ? "Add My Tokens Now" : "Add My Credentials"}
+                  </button>
+                  <div className="flex items-center gap-3 text-xs text-gray-500">
+                    <span className="flex items-center gap-1"><Github className="w-3.5 h-3.5" /> GitHub</span>
+                    <span className="flex items-center gap-1"><Globe className="w-3.5 h-3.5" /> Vercel</span>
+                    <span className="flex items-center gap-1"><Database className="w-3.5 h-3.5" /> Supabase</span>
+                  </div>
+                </div>
               </div>
             </div>
           </div>

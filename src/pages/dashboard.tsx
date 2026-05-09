@@ -377,6 +377,10 @@ export default function DashboardPage() {
   const activeProjects = data?.projects?.filter((p) => p.status !== "delivered") || [];
   const deliveredProjects = data?.projects?.filter((p) => p.status === "delivered") || [];
 
+  // Paid users have a role of SITE, CODE, or BUNDLE — they have full portal access
+  // regardless of whether they have active projects yet.
+  const isPaidUser = ["SITE", "CODE", "BUNDLE"].includes(data?.user?.role || "");
+
   if (loading) {
     return (
       <div className="min-h-screen bg-[#0a0a1a] flex items-center justify-center">
@@ -439,6 +443,8 @@ export default function DashboardPage() {
               <p className="text-gray-400 text-sm">
                 {data?.projects?.length
                   ? `You have ${data.projects.length} project${data.projects.length > 1 ? "s" : ""} — ${activeProjects.length} active.`
+                  : isPaidUser
+                  ? "Your plan is active — open the agent to get started."
                   : "No projects yet. Start your first rescue below."}
               </p>
             </div>
@@ -615,20 +621,55 @@ export default function DashboardPage() {
           </section>
         )}
 
-        {/* No projects yet */}
+        {/* No projects yet — show different UX depending on whether user has paid */}
         {!data?.projects?.length && (
-          <section className="text-center py-16">
-            <div className="w-16 h-16 bg-blue-500/15 rounded-full flex items-center justify-center mx-auto mb-4">
-              <Zap className="w-8 h-8 text-blue-400" />
-            </div>
-            <h3 className="text-xl font-bold mb-2">No projects yet</h3>
-            <p className="text-gray-400 mb-6 max-w-md mx-auto">
-              Start your first code rescue. Pick a plan, describe what's broken, and our agent gets to work.
-            </p>
-            <Link to="/signup" className="inline-flex items-center gap-2 bg-gradient-to-r from-blue-500 to-cyan-400 text-black font-bold px-6 py-3 rounded-xl hover:opacity-90 transition">
-              <Plus className="w-4 h-4" /> Start First Rescue
-            </Link>
-          </section>
+          isPaidUser ? (
+            /* ── PAID USER: full access banner → send them straight to the agent ── */
+            <section>
+              <div className="bg-gradient-to-r from-green-500/10 to-emerald-500/10 border border-green-500/30 rounded-2xl p-8 text-center">
+                <div className="w-16 h-16 bg-green-500/20 rounded-full flex items-center justify-center mx-auto mb-4">
+                  <Sparkles className="w-8 h-8 text-green-400" />
+                </div>
+                <h3 className="text-2xl font-bold mb-2 text-white">
+                  You're all set, {data?.user?.name?.split(" ")[0] || "there"} 🎉
+                </h3>
+                <p className="text-gray-400 mb-2 max-w-lg mx-auto">
+                  Your <span className="text-green-300 font-semibold">{TIER_LABELS[data?.user?.role || ""] || data?.user?.role}</span> plan is active.
+                  The agent is ready to fix your code, deploy your project, and manage your repos right now.
+                </p>
+                <p className="text-gray-500 text-sm mb-8 max-w-md mx-auto">
+                  Paste a GitHub link, share an error, or describe what's broken — the agent handles the rest.
+                </p>
+                <Link
+                  to="/chat"
+                  className="inline-flex items-center gap-3 bg-gradient-to-r from-blue-500 to-cyan-400 text-black font-bold px-8 py-4 rounded-xl hover:opacity-90 transition text-base"
+                >
+                  <MessageSquare className="w-5 h-5" />
+                  Open Agent Chat
+                  <ArrowRight className="w-5 h-5" />
+                </Link>
+                <div className="mt-6 flex items-center justify-center gap-6 text-xs text-gray-500">
+                  <span className="flex items-center gap-1.5"><Github className="w-3.5 h-3.5" /> GitHub access</span>
+                  <span className="flex items-center gap-1.5"><Globe className="w-3.5 h-3.5" /> Vercel deploy</span>
+                  <span className="flex items-center gap-1.5"><Database className="w-3.5 h-3.5" /> Supabase access</span>
+                </div>
+              </div>
+            </section>
+          ) : (
+            /* ── FREE / UNPAID USER: show the conversion / paywall screen ── */
+            <section className="text-center py-16">
+              <div className="w-16 h-16 bg-blue-500/15 rounded-full flex items-center justify-center mx-auto mb-4">
+                <Zap className="w-8 h-8 text-blue-400" />
+              </div>
+              <h3 className="text-xl font-bold mb-2">No projects yet</h3>
+              <p className="text-gray-400 mb-6 max-w-md mx-auto">
+                Start your first code rescue. Pick a plan, describe what's broken, and our agent gets to work.
+              </p>
+              <Link to="/signup" className="inline-flex items-center gap-2 bg-gradient-to-r from-blue-500 to-cyan-400 text-black font-bold px-6 py-3 rounded-xl hover:opacity-90 transition">
+                <Plus className="w-4 h-4" /> Start First Rescue
+              </Link>
+            </section>
+          )
         )}
 
         {/* Monthly Maintenance */}

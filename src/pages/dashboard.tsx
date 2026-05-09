@@ -844,6 +844,7 @@ function CustomCredentialEntry({
 }
 
 
+export default function DashboardPage() {
   const { user, token, logout } = useAuth();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
